@@ -118,7 +118,12 @@ function New-PurviewConfigurationReport
                 $sourceDataPath = Join-Path -Path $Path -ChildPath "$($mapEntry.Key).xml"
                 if (Test-Path -Path $sourceDataPath)
                 {
-                    New-Variable -Name $mapEntry.Value -Value (Import-Clixml -Path $sourceDataPath) -Force -Scope Script
+                    # -WhatIf:$false -Confirm:$false: this is internal bookkeeping state, not the
+                    # user-visible change the caller's -WhatIf/-Confirm apply to. Without this,
+                    # a caller who answers -Confirm with "No" (or runs -WhatIf) would leave the
+                    # prior call's stale data in place, reintroducing the cross-tenant data leak
+                    # this reset exists to prevent.
+                    New-Variable -Name $mapEntry.Value -Value (Import-Clixml -Path $sourceDataPath) -Force -Scope Script -WhatIf:$false -Confirm:$false
                 }
                 else
                 {
@@ -127,7 +132,7 @@ function New-PurviewConfigurationReport
                     # missing this file would silently reuse the previous run's data (e.g. from
                     # a different tenant).
                     Write-Verbose "Source data file not found, resetting: $sourceDataPath"
-                    New-Variable -Name $mapEntry.Value -Value $null -Force -Scope Script
+                    New-Variable -Name $mapEntry.Value -Value $null -Force -Scope Script -WhatIf:$false -Confirm:$false
                 }
             }
         }

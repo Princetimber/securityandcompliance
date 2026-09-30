@@ -43,7 +43,12 @@ BeforeAll {
 Describe 'Export-PurviewConfiguration' {
     Context 'Parameter validation' {
         It 'requires the OutputPath parameter' {
-            { Export-PurviewConfiguration } | Should -Throw
+            # Actually invoking the function without -OutputPath would prompt on the missing
+            # mandatory parameter and hang on stdin outside this sandboxed session - assert on
+            # the parameter metadata instead.
+            $attribute = (Get-Command Export-PurviewConfiguration).Parameters['OutputPath'].Attributes |
+                Where-Object { $_ -is [System.Management.Automation.ParameterAttribute] }
+            $attribute.Mandatory | Should -BeTrue
         }
 
         It 'throws on an unrecognised -Command value (regression for command-injection finding)' {

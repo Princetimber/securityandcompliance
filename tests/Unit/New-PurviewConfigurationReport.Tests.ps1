@@ -27,7 +27,12 @@ BeforeAll {
 Describe 'New-PurviewConfigurationReport' {
     Context 'Parameter validation' {
         It 'requires the SourcePath parameter' {
-            { New-PurviewConfigurationReport } | Should -Throw
+            # Actually invoking the function without -SourcePath would prompt on the missing
+            # mandatory parameter and hang on stdin outside this sandboxed session - assert on
+            # the parameter metadata instead.
+            $attribute = (Get-Command New-PurviewConfigurationReport).Parameters['SourcePath'].Attributes |
+                Where-Object { $_ -is [System.Management.Automation.ParameterAttribute] }
+            $attribute.Mandatory | Should -BeTrue
         }
 
         It 'rejects a SourcePath that does not exist' {
@@ -84,7 +89,10 @@ Describe 'New-PurviewConfigurationReport' {
                 tooltip                 = 'Test tooltip'
                 ContentType             = 'File, Email'
                 Workload                = 'All'
-                Settings                = @('[color, #FF0000]')
+                # Sentinel value that appears ONLY in Settings, not in LabelActions/anywhere else
+                # in this fixture, so the assertion below can't pass vacuously via a different
+                # code path rendering the same string.
+                Settings                = @('[settingsonlykey, sentinel-7f3a]')
                 LabelActions            = $labelActions
                 LocaleSettings          = $localeSettings
                 Policy                  = 'Policy1'
@@ -137,8 +145,10 @@ Describe 'New-PurviewConfigurationReport' {
         }
 
         It 'renders an advanced label setting that is not one of the excluded parameter keys (regression for inverted filter finding)' {
-            $html | Should -Match 'color'
-            $html | Should -Match '#FF0000'
+            # 'sentinel-7f3a' exists only in this label's Settings array, nowhere else in the
+            # fixture, so this can't pass because some other rendering path happens to emit it.
+            $html | Should -Match 'settingsonlykey'
+            $html | Should -Match 'sentinel-7f3a'
         }
 
         It 'wraps the document in a proper html element' {
