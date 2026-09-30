@@ -71,6 +71,12 @@ Describe 'New-PurviewConfigurationReport' {
                         @{ Key = 'rightsdefinitions'; Value = '{"Identity":"user@contoso.com","Rights":"View"}' }
                     )
                 }
+                @{
+                    Type     = 'applycontentmarking'
+                    Settings = @(
+                        @{ Key = 'markingtext'; Value = 'CONFIDENTIAL' }
+                    )
+                }
             ) | ConvertTo-Json -Depth 5
 
             $localeSettings = @(
@@ -137,6 +143,11 @@ Describe 'New-PurviewConfigurationReport' {
                 Name = 'Retention-Policy'
             } | Export-Clixml -Path (Join-Path -Path $tenantPath -ChildPath 'Get-RetentionCompliancePolicy.xml')
 
+            @(
+                [pscustomobject]@{ Name = 'Built-in-SIT'; Publisher = 'Microsoft Corporation' }
+                [pscustomobject]@{ Name = 'Custom-SIT'; Publisher = 'Contoso' }
+            ) | Export-Clixml -Path (Join-Path -Path $tenantPath -ChildPath 'Get-DlpSensitiveInformationType.xml')
+
             $script:html = Get-ReportHtml -SourcePath $tenantPath
         }
 
@@ -156,6 +167,16 @@ Describe 'New-PurviewConfigurationReport' {
             $html | Should -Match '</html>'
         }
 
+        It 'renders the applycontentmarking label action' {
+            $html | Should -Match 'markingtext'
+            $html | Should -Match 'CONFIDENTIAL'
+        }
+
+        It 'renders only the custom SIT, excluding the built-in Microsoft one' {
+            $html | Should -Match 'Custom-SIT'
+            $html | Should -Not -Match 'Built-in-SIT'
+        }
+
         It 'renders the sensitivity label policy, DLP policy, DLP rule, and a generic detail section' {
             $html | Should -Match 'Confidential-Policy'
             $html | Should -Match 'DLP-Policy'
@@ -170,6 +191,29 @@ Describe 'New-PurviewConfigurationReport' {
             New-PurviewConfigurationReport -SourcePath $tenantPath -WhatIf
 
             Test-Path -Path (Join-Path -Path $tenantPath -ChildPath 'Report.html') | Should -BeFalse
+        }
+    }
+
+    Context 'Transcript cleanup on failure (regression for MEDIUM finding: transcript left running on error)' {
+        It 'stops the transcript even when report generation throws' {
+            $tenantPath = Get-TestSourcePath
+            Mock Start-Transcript -MockWith {}
+            Mock Stop-Transcript -MockWith {}
+            Mock Out-File -MockWith { throw 'boom' }
+
+            { New-PurviewConfigurationReport -SourcePath $tenantPath -Transcript -Confirm:$false } | Should -Throw
+
+            Should -Invoke Stop-Transcript -Times 1
+        }
+
+        It 'does not call Stop-Transcript when -Transcript -WhatIf never actually started one' {
+            $tenantPath = Get-TestSourcePath
+            Mock Start-Transcript -MockWith {}
+            Mock Stop-Transcript -MockWith {}
+
+            New-PurviewConfigurationReport -SourcePath $tenantPath -Transcript -WhatIf
+
+            Should -Invoke Stop-Transcript -Times 0
         }
     }
 }
