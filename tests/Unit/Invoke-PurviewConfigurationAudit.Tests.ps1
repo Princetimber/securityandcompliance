@@ -4,7 +4,7 @@
 BeforeAll {
     # Invoke-PurviewConfigurationAudit.ps1 dot-sources both real function files itself;
     # mock the two stage functions afterwards rather than stubbing their dependencies.
-    . "$PSScriptRoot/../../Invoke-PurviewConfigurationAudit.ps1"
+    . "$PSScriptRoot/../../source/Public/Invoke-PurviewConfigurationAudit.ps1"
 
     Mock Export-PurviewConfiguration -MockWith {
         [pscustomobject]@{ Command = 'Get-Label'; RecordCount = 1; Exported = $true }

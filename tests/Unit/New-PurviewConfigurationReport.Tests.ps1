@@ -2,7 +2,7 @@
 #Requires -Modules @{ ModuleName = 'Pester'; ModuleVersion = '6.0.0' }
 
 BeforeAll {
-    . "$PSScriptRoot/../../New-PurviewConfigurationReport.ps1"
+    . "$PSScriptRoot/../../source/Public/New-PurviewConfigurationReport.ps1"
 
     function Get-TestSourcePath
     {

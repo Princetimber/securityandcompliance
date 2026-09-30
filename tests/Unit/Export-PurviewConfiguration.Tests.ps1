@@ -41,10 +41,27 @@ BeforeAll {
         )
     }
 
+    $script:defaultConnectionInformationCallCount = 0
     function Get-ConnectionInformation
     {
+        # Default (unmocked) return: empty on the first call (the "before connect" snapshot the
+        # real code takes to diff against), a connection with a non-null TenantID on every call
+        # after that - mimicking a genuine connect actually adding a new session, which the
+        # before/after ConnectionId diff in Export-PurviewConfiguration.ps1 depends on. A static
+        # return here would make every call "already present" and filtered out of the diff.
+        # Tests that care about specific ConnectionId/TenantID values override this with their
+        # own Mock.
         [CmdletBinding()]
         param()
+        $script:defaultConnectionInformationCallCount++
+        if ($script:defaultConnectionInformationCallCount -eq 1)
+        {
+            @()
+        }
+        else
+        {
+            @([pscustomobject]@{ ConnectionId = 'default-connection'; TenantID = 'default-tenant' })
+        }
     }
 
     function Get-ComplianceSecurityFilter
@@ -91,7 +108,7 @@ BeforeAll {
         )
     }
 
-    . "$PSScriptRoot/../../Export-PurviewConfiguration.ps1"
+    . "$PSScriptRoot/../../source/Public/Export-PurviewConfiguration.ps1"
 
     Mock Connect-IPPSSession -MockWith {}
     Mock Disconnect-ExchangeOnline -MockWith {}
@@ -99,6 +116,13 @@ BeforeAll {
 }
 
 Describe 'Export-PurviewConfiguration' {
+    BeforeEach {
+        # Reset the default Get-ConnectionInformation stub's call counter before every test, so
+        # each test's own "before connect" snapshot starts fresh rather than continuing a count
+        # left over from whichever test ran previously in this file.
+        $script:defaultConnectionInformationCallCount = 0
+    }
+
     Context 'Parameter validation' {
         It 'requires the OutputPath parameter' {
             # Actually invoking the function without -OutputPath would prompt on the missing
@@ -112,6 +136,15 @@ Describe 'Export-PurviewConfiguration' {
         It 'throws on an unrecognised -Command value (regression for command-injection finding)' {
             { Export-PurviewConfiguration -OutputPath $TestDrive -Command 'Get-TotallyMadeUpCmdlet' -SkipModuleCheck -SkipComplianceSecurityFilter -Confirm:$false } |
                 Should -Throw
+        }
+
+        It 'validates -Command before connecting or installing anything (regression for MEDIUM finding: validated too late)' {
+            Mock Install-Module -MockWith {}
+            { Export-PurviewConfiguration -OutputPath $TestDrive -Command 'Get-TotallyMadeUpCmdlet' -Confirm:$false -ErrorAction Stop } |
+                Should -Throw
+
+            Should -Invoke Connect-IPPSSession -Times 0
+            Should -Invoke Install-Module -Times 0
         }
     }
 
@@ -242,9 +275,9 @@ Describe 'Export-PurviewConfiguration' {
                 switch ($script:connectionInformationCallCount)
                 {
                     1 { @() }
-                    2 { @([pscustomobject]@{ ConnectionId = 'standard-1' }) }
-                    3 { @([pscustomobject]@{ ConnectionId = 'standard-1' }) }
-                    default { @([pscustomobject]@{ ConnectionId = 'standard-1' }, [pscustomobject]@{ ConnectionId = 'search-1' }) }
+                    2 { @([pscustomobject]@{ ConnectionId = 'standard-1'; TenantID = 'tenant-1' }) }
+                    3 { @([pscustomobject]@{ ConnectionId = 'standard-1'; TenantID = 'tenant-1' }) }
+                    default { @([pscustomobject]@{ ConnectionId = 'standard-1'; TenantID = 'tenant-1' }, [pscustomobject]@{ ConnectionId = 'search-1'; TenantID = 'tenant-1' }) }
                 }
             }
         }
@@ -263,8 +296,26 @@ Describe 'Export-PurviewConfiguration' {
         It 'disconnects only the standard-session ConnectionId this function opened, never a blind disconnect' {
             $null = Export-PurviewConfiguration -OutputPath $TestDrive -AccessToken 'fake.jwt.token' -Organization 'contoso.onmicrosoft.com' -Command 'Get-ComplianceSecurityFilter' -SkipModuleCheck -Confirm:$false
 
-            Should -Invoke Disconnect-ExchangeOnline -Times 1 -ParameterFilter { $ConnectionId -eq 'standard-1' }
-            Should -Invoke Disconnect-ExchangeOnline -Times 1 -ParameterFilter { $ConnectionId -eq 'search-1' }
+            # -Exactly: Pester's -Times N means "at least N" without it, which would not catch a
+            # double-disconnect of the same session (the CSF pass's own disconnect plus a second
+            # one from the outer finally, if $standardConnectionId were not cleared in between).
+            Should -Invoke Disconnect-ExchangeOnline -Times 1 -Exactly -ParameterFilter { $ConnectionId -eq 'standard-1' }
+            Should -Invoke Disconnect-ExchangeOnline -Times 1 -Exactly -ParameterFilter { $ConnectionId -eq 'search-1' }
+        }
+
+        It 'disconnects the standard session even when -SkipComplianceSecurityFilter skips the CSF pass entirely (regression for MEDIUM finding: session left connected)' {
+            $null = Export-PurviewConfiguration -OutputPath $TestDrive -AccessToken 'fake.jwt.token' -Organization 'contoso.onmicrosoft.com' -Command 'Get-Label' -SkipModuleCheck -SkipComplianceSecurityFilter -Confirm:$false
+
+            Should -Invoke Disconnect-ExchangeOnline -Times 1 -Exactly -ParameterFilter { $ConnectionId -eq 'standard-1' }
+        }
+
+        It 'disconnects the standard session even when a terminating error occurs after connecting' {
+            Mock New-Item -MockWith { throw 'disk full' }
+
+            { Export-PurviewConfiguration -OutputPath (Join-Path $TestDrive ([guid]::NewGuid())) -AccessToken 'fake.jwt.token' -Organization 'contoso.onmicrosoft.com' -Command 'Get-Label' -SkipModuleCheck -SkipComplianceSecurityFilter -Confirm:$false -ErrorAction Stop } |
+                Should -Throw
+
+            Should -Invoke Disconnect-ExchangeOnline -Times 1 -Exactly -ParameterFilter { $ConnectionId -eq 'standard-1' }
         }
     }
 
