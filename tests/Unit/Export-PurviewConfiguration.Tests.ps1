@@ -53,6 +53,34 @@ BeforeAll {
         param()
     }
 
+    function Get-QuarantineMessage
+    {
+        [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSReviewUnusedParameter', '', Justification = 'Stub signature only, mocked in tests below')]
+        [CmdletBinding()]
+        param(
+            [Parameter()]
+            [int]$Page,
+            [Parameter()]
+            [int]$PageSize,
+            [Parameter()]
+            [datetime]$StartReceivedDate,
+            [Parameter()]
+            [datetime]$EndReceivedDate
+        )
+    }
+
+    function Get-DlpDetectionsReport
+    {
+        [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSReviewUnusedParameter', '', Justification = 'Stub signature only, mocked in tests below')]
+        [CmdletBinding()]
+        param(
+            [Parameter()]
+            [int]$Page,
+            [Parameter()]
+            [int]$PageSize
+        )
+    }
+
     function Get-Label
     {
         [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSReviewUnusedParameter', '', Justification = 'Stub signature only, mocked in tests below')]
@@ -237,6 +265,34 @@ Describe 'Export-PurviewConfiguration' {
 
             Should -Invoke Disconnect-ExchangeOnline -Times 1 -ParameterFilter { $ConnectionId -eq 'standard-1' }
             Should -Invoke Disconnect-ExchangeOnline -Times 1 -ParameterFilter { $ConnectionId -eq 'search-1' }
+        }
+    }
+
+    Context 'Paged reporting cmdlets (regression for MEDIUM finding: silent under-reporting)' {
+        It 'pages through Get-QuarantineMessage until a short page ends the loop' {
+            Mock Get-QuarantineMessage -ParameterFilter { $Page -eq 1 } -MockWith {
+                1..1000 | ForEach-Object { [pscustomobject]@{ Identity = "msg-$_" } }
+            }
+            Mock Get-QuarantineMessage -ParameterFilter { $Page -eq 2 } -MockWith {
+                @([pscustomobject]@{ Identity = 'msg-1001' })
+            }
+
+            $result = Export-PurviewConfiguration -OutputPath $TestDrive -Command 'Get-QuarantineMessage' -SkipModuleCheck -SkipComplianceSecurityFilter -Confirm:$false
+
+            $result.RecordCount | Should -Be 1001
+            Should -Invoke Get-QuarantineMessage -Times 2
+            Should -Invoke Get-QuarantineMessage -Times 1 -ParameterFilter { $PageSize -eq 1000 -and $StartReceivedDate -and $EndReceivedDate }
+        }
+
+        It 'stops after a single short page when there is only one page of data' {
+            Mock Get-DlpDetectionsReport -MockWith {
+                @([pscustomobject]@{ Identity = 'event-1' }, [pscustomobject]@{ Identity = 'event-2' })
+            }
+
+            $result = Export-PurviewConfiguration -OutputPath $TestDrive -Command 'Get-DlpDetectionsReport' -SkipModuleCheck -SkipComplianceSecurityFilter -Confirm:$false
+
+            $result.RecordCount | Should -Be 2
+            Should -Invoke Get-DlpDetectionsReport -Times 1 -ParameterFilter { $PageSize -eq 5000 }
         }
     }
 
