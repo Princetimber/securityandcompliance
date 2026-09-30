@@ -41,6 +41,7 @@ function New-PurviewConfigurationReport
             Technology Architecture - Content+Cloud
     #>
     [CmdletBinding(SupportsShouldProcess)]
+    [OutputType([void])]
     param(
         [Parameter(
             Position = 0,
@@ -121,7 +122,12 @@ function New-PurviewConfigurationReport
                 }
                 else
                 {
-                    Write-Verbose "Source data file not found, skipping: $sourceDataPath"
+                    # Explicitly reset to $null rather than leaving a stale value from a prior
+                    # call in the same session — otherwise a later run against a SourcePath
+                    # missing this file would silently reuse the previous run's data (e.g. from
+                    # a different tenant).
+                    Write-Verbose "Source data file not found, resetting: $sourceDataPath"
+                    New-Variable -Name $mapEntry.Value -Value $null -Force -Scope Script
                 }
             }
         }
@@ -146,7 +152,7 @@ function New-PurviewConfigurationReport
                 [string[]]$ExcludeProperty = @('PSComputerName', 'RunspaceId', 'PSShowComputerName')
             )
 
-            $sectionHtml = "<h2 align='left'>$(ConvertTo-SafeHtml $Heading)</h4>"
+            $sectionHtml = "<h2 align='left'>$(ConvertTo-SafeHtml $Heading)</h2>"
             if (-not $Items -or @($Items).Count -eq 0)
             {
                 $sectionHtml += "<p><i>No data exported for this workload.</i></p>"
@@ -266,6 +272,7 @@ function New-PurviewConfigurationReport
     {
         $output = '
 <!DOCTYPE html>
+<html lang="en">
 <head>
 <meta charset="utf-8">
 <title>Information Protection Report</title>
@@ -303,7 +310,7 @@ function New-PurviewConfigurationReport
 <h4 align='center' style='border-bottom: 1px lightblue solid; padding-bottom: 10px;'>Generated $(ConvertTo-SafeHtml (Get-Date -Format 'dd/MM/yyyy HH:mm'))</h4>
 "
         #region Sensitivity Labels
-        $output += "<h2 align='left'>Sensitivity Labels</h4>"
+        $output += "<h2 align='left'>Sensitivity Labels</h2>"
         foreach ($label in $x_Labels)
         {
             $labelSettings = ConvertTo-MIPHashtable -SourceArray $label.Settings
@@ -326,7 +333,7 @@ function New-PurviewConfigurationReport
             foreach ($labelSetting in $labelSettings.GetEnumerator())
             {
                 # Exclude advanced settings which are also parameters
-                if ('tooltip', 'contenttype', 'displayname' -contains $labelSetting.Key)
+                if ('tooltip', 'contenttype', 'displayname' -notcontains $labelSetting.Key)
                 {
                     $output += "<tr><td>$(ConvertTo-SafeHtml $labelSetting.Key)</td><td>$(ConvertTo-SafeHtml $labelSetting.Value)</td></tr>"
                 }
@@ -415,7 +422,7 @@ function New-PurviewConfigurationReport
         #endregion Sensitivity Labels
 
         #region Sensitivity Label Policies
-        $output += "<h2 align='left'>Sensitivity Label Policies</h4>"
+        $output += "<h2 align='left'>Sensitivity Label Policies</h2>"
         foreach ($labelPolicy in $x_Labelpolicies)
         {
             $labelPolicySettings = ConvertTo-MIPHashtable -SourceArray $labelPolicy.Settings
@@ -470,7 +477,7 @@ function New-PurviewConfigurationReport
         #endregion Auto-Labeling
 
         #region DLP Policies
-        $output += "<h2 align='left'>DLP Policies</h4>"
+        $output += "<h2 align='left'>DLP Policies</h2>"
         foreach ($dlpPolicy in $x_DLPCompliancePolicies)
         {
             $output += "<table align='center' style='width: 65%;'>
@@ -528,7 +535,7 @@ function New-PurviewConfigurationReport
         #endregion DLP Policies
 
         #region DLP Rules
-        $output += "<h2 align='left'>DLP Rules</h4>"
+        $output += "<h2 align='left'>DLP Rules</h2>"
         foreach ($dlpRule in $x_DLPComplianceRules)
         {
             $output += "<table align='center' style='width: 65%;'>

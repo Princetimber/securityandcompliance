@@ -17,8 +17,9 @@ function Invoke-PurviewConfigurationAudit
         their own — e.g. to re-export a subset of cmdlets, or to re-render the report from an
         existing export without reconnecting to the tenant.
 
-        Requires membership of the Compliance Administrator or Security Administrator role
-        (or an equivalent custom role) in the target tenant.
+        Requires membership of the Compliance Administrator or Compliance Data Administrator
+        role (or an equivalent custom role) in the target tenant for the baseline cmdlet set —
+        see LEAST-PRIVILEGE.md for the full per-section breakdown.
 
     .PARAMETER OutputPath
         Folder to write the exported .xml files and the HTML report to. Created if it does
@@ -75,6 +76,7 @@ function Invoke-PurviewConfigurationAudit
         identity-scoped cmdlets that are not included in the default export set.
     #>
     [CmdletBinding(SupportsShouldProcess)]
+    [OutputType([pscustomobject])]
     param(
         [Parameter(
             Position = 0,
