@@ -10,6 +10,15 @@
     (e.g. `. ./source/Public/Export-PurviewConfiguration.ps1`) without going through this
     loader - this loader is a convenience for loading everything in one call, e.g. for a
     one-shot audit run or for Pester tests that need the full set.
+
+    No module boundary: this is a flat dot-source layout, not a buildable module, so every
+    source/Private/*.ps1 function becomes a plain global function in the caller's session once
+    loaded - exactly like the public ones, with no enforced "private" scoping. In a long-lived
+    session that also loads other tooling, a generically-named private helper here (e.g.
+    Get-PagedReportData, Invoke-ExportCommand) could collide with and silently shadow a
+    same-named function from another loaded module, or vice versa. Prefer a fresh PowerShell
+    session per run, or check `Get-Command <name> -All` first if this is ever loaded alongside
+    other modules in the same session.
 #>
 
 $privatePath = Join-Path -Path $PSScriptRoot -ChildPath 'source/Private'

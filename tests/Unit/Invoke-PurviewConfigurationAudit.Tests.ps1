@@ -48,6 +48,12 @@ Describe 'Invoke-PurviewConfigurationAudit' {
                 $AccessToken -eq 'fake.jwt.token' -and $Organization -eq 'contoso.onmicrosoft.com'
             }
         }
+
+        It 'passes -Force through to Export-PurviewConfiguration (regression for MEDIUM finding: no way to retry a tenant-mismatched OutputPath via the wrapper)' {
+            Invoke-PurviewConfigurationAudit -OutputPath $TestDrive -Force -Confirm:$false
+
+            Should -Invoke Export-PurviewConfiguration -Times 1 -ParameterFilter { $Force -eq $true }
+        }
     }
 
     Context 'ShouldProcess / -WhatIf' {

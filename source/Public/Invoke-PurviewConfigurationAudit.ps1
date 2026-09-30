@@ -69,6 +69,11 @@ function Invoke-PurviewConfigurationAudit
         if the connected account doesn't have eDiscovery Administrator and you'd rather avoid
         the extra reconnect/disconnect than see it fail.
 
+    .PARAMETER Force
+        Passed through to Export-PurviewConfiguration -Force. Required to reuse an -OutputPath
+        that was last exported for a different tenant, or that already contains exported .xml
+        files with no tenant manifest.
+
     .PARAMETER Transcript
         Start a PowerShell transcript alongside report generation. Passed through to
         New-PurviewConfigurationReport -Transcript.
@@ -148,6 +153,9 @@ function Invoke-PurviewConfigurationAudit
         [switch]$SkipComplianceSecurityFilter,
 
         [Parameter()]
+        [switch]$Force,
+
+        [Parameter()]
         [switch]$Transcript,
 
         [Parameter()]
@@ -192,6 +200,7 @@ function Invoke-PurviewConfigurationAudit
         if ($Command) { $exportParams.Command = $Command }
         if ($SkipModuleCheck) { $exportParams.SkipModuleCheck = $true }
         if ($SkipComplianceSecurityFilter) { $exportParams.SkipComplianceSecurityFilter = $true }
+        if ($Force) { $exportParams.Force = $true }
 
         Write-Verbose "Stage 1/2: Export-PurviewConfiguration -OutputPath $OutputPath"
         Export-PurviewConfiguration @exportParams

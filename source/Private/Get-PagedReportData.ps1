@@ -17,10 +17,21 @@ function Get-PagedReportData
         [hashtable]$AdditionalParameters = @{}
     )
 
+    # Hard ceiling in case the underlying cmdlet ever ignores -Page/-PageSize and keeps
+    # returning a full page forever - 10,000 pages at the smallest PageSize this function is
+    # called with (1000) is 10 million records, far beyond any real tenant's data for these
+    # cmdlets; this exists only to fail loudly instead of looping forever if that assumption
+    # is ever wrong.
+    $maximumPages = 10000
+
     $results = [System.Collections.Generic.List[object]]::new()
     $page = 1
     do
     {
+        if ($page -gt $maximumPages)
+        {
+            Write-Error -Message "$CmdletName did not finish paging after $maximumPages pages - it may not be honouring -Page/-PageSize. Stopping to avoid an unbounded loop." -Category LimitsExceeded -ErrorAction Stop
+        }
         $pageParameters = $AdditionalParameters.Clone()
         $pageParameters.Page = $page
         $pageParameters.PageSize = $PageSize

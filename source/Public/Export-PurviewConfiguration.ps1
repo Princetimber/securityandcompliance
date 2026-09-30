@@ -5,6 +5,7 @@
 . "$PSScriptRoot/../Private/Get-PagedReportData.ps1"
 . "$PSScriptRoot/../Private/Confirm-ExportOutputPath.ps1"
 . "$PSScriptRoot/../Private/Invoke-ExportCommand.ps1"
+. "$PSScriptRoot/../Private/Get-NewConnectionInformation.ps1"
 
 function Export-PurviewConfiguration
 {
@@ -368,12 +369,7 @@ function Export-PurviewConfiguration
         Write-Verbose "Connecting to Security & Compliance PowerShell (method: $($PSCmdlet.ParameterSetName))"
         $priorConnectionIds = @(Get-ConnectionInformation -ErrorAction SilentlyContinue | Select-Object -ExpandProperty ConnectionId)
         Connect-IPPSSession @connectParams -ErrorAction Stop
-        # Select the whole object (not -ExpandProperty) so both ConnectionId and TenantID come
-        # from a single Get-ConnectionInformation call - a second call here would shift the
-        # call-count-driven mocks the reconnect tests rely on.
-        $standardConnection = Get-ConnectionInformation |
-            Where-Object { $_.ConnectionId -notin $priorConnectionIds } |
-            Select-Object -First 1
+        $standardConnection = Get-NewConnectionInformation -PriorConnectionIds $priorConnectionIds
         $standardConnectionId = $standardConnection.ConnectionId
         $tenantId = $standardConnection.TenantID
     }
@@ -440,9 +436,7 @@ function Export-PurviewConfiguration
                     }
                     $priorConnectionIds = @(Get-ConnectionInformation -ErrorAction SilentlyContinue | Select-Object -ExpandProperty ConnectionId)
                     Connect-IPPSSession @connectParams -EnableSearchOnlySession -ErrorAction Stop
-                    $searchConnectionId = Get-ConnectionInformation |
-                        Where-Object { $_.ConnectionId -notin $priorConnectionIds } |
-                        Select-Object -First 1 -ExpandProperty ConnectionId
+                    $searchConnectionId = (Get-NewConnectionInformation -PriorConnectionIds $priorConnectionIds).ConnectionId
                     $data = Get-ComplianceSecurityFilter -ErrorAction Stop
                     if ($data)
                     {

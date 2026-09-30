@@ -214,6 +214,38 @@ Describe 'Export-PurviewConfiguration' {
         }
     }
 
+    Context 'Connection-ID capture fallback (regression for MEDIUM finding: diff can miss the new session)' {
+        BeforeAll {
+            Mock Get-Label -MockWith { @([pscustomobject]@{ Name = 'Confidential' }) }
+        }
+
+        It 'falls back to the single connection present when the before/after diff finds nothing new' {
+            # Get-ConnectionInformation returns the same one connection both before and after
+            # Connect-IPPSSession - simulating the diff missing a newly opened session because
+            # it hadn't yet appeared, rather than because nothing is actually connected.
+            Mock Get-ConnectionInformation -MockWith { @([pscustomobject]@{ ConnectionId = 'only-connection'; TenantID = 'tenant-only' }) }
+
+            $result = Export-PurviewConfiguration -OutputPath $TestDrive -Command 'Get-Label' -SkipModuleCheck -SkipComplianceSecurityFilter -Confirm:$false
+
+            $result.Exported | Should -BeTrue
+            Should -Invoke Disconnect-ExchangeOnline -Times 1 -Exactly -ParameterFilter { $ConnectionId -eq 'only-connection' }
+        }
+
+        It 'throws a clear error instead of silently losing track of the session when the diff is ambiguous' {
+            # Two connections present, neither distinguishable as "new" by the diff - this
+            # function cannot safely guess which one it just opened.
+            Mock Get-ConnectionInformation -MockWith {
+                @(
+                    [pscustomobject]@{ ConnectionId = 'other-session'; TenantID = 'tenant-other' }
+                    [pscustomobject]@{ ConnectionId = 'another-session'; TenantID = 'tenant-another' }
+                )
+            }
+
+            { Export-PurviewConfiguration -OutputPath $TestDrive -Command 'Get-Label' -SkipModuleCheck -SkipComplianceSecurityFilter -Confirm:$false -ErrorAction Stop } |
+                Should -Throw '*could not identify the new session*'
+        }
+    }
+
     Context 'Authentication parameter sets' {
         BeforeAll {
             Mock Get-Label -MockWith { @([pscustomobject]@{ Name = 'Confidential' }) }
