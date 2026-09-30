@@ -214,21 +214,21 @@ Describe 'Export-PurviewConfiguration' {
         }
     }
 
-    Context 'Connection-ID capture fallback (regression for MEDIUM finding: diff can miss the new session)' {
+    Context 'Connection-ID capture never trusts a stale/reused connection (regression for MEDIUM security finding)' {
         BeforeAll {
             Mock Get-Label -MockWith { @([pscustomobject]@{ Name = 'Confidential' }) }
         }
 
-        It 'falls back to the single connection present when the before/after diff finds nothing new' {
-            # Get-ConnectionInformation returns the same one connection both before and after
-            # Connect-IPPSSession - simulating the diff missing a newly opened session because
-            # it hadn't yet appeared, rather than because nothing is actually connected.
-            Mock Get-ConnectionInformation -MockWith { @([pscustomobject]@{ ConnectionId = 'only-connection'; TenantID = 'tenant-only' }) }
+        It 'throws instead of returning a single connection that was already present before connecting (cross-tenant boundary confusion)' {
+            # Get-ConnectionInformation returns the SAME one connection both before and after
+            # Connect-IPPSSession - i.e. nothing genuinely new connected (a silent reuse/failure
+            # to replace the session). An earlier version of this fallback returned that stale
+            # connection as if it were the one just opened, which could bind the tenant-stamp
+            # safety check to the WRONG tenant's ConnectionId/TenantID. It must now refuse.
+            Mock Get-ConnectionInformation -MockWith { @([pscustomobject]@{ ConnectionId = 'stale-connection'; TenantID = 'stale-tenant' }) }
 
-            $result = Export-PurviewConfiguration -OutputPath $TestDrive -Command 'Get-Label' -SkipModuleCheck -SkipComplianceSecurityFilter -Confirm:$false
-
-            $result.Exported | Should -BeTrue
-            Should -Invoke Disconnect-ExchangeOnline -Times 1 -Exactly -ParameterFilter { $ConnectionId -eq 'only-connection' }
+            { Export-PurviewConfiguration -OutputPath $TestDrive -Command 'Get-Label' -SkipModuleCheck -SkipComplianceSecurityFilter -Confirm:$false -ErrorAction Stop } |
+                Should -Throw '*could not identify the new session*'
         }
 
         It 'throws a clear error instead of silently losing track of the session when the diff is ambiguous' {
@@ -243,6 +243,26 @@ Describe 'Export-PurviewConfiguration' {
 
             { Export-PurviewConfiguration -OutputPath $TestDrive -Command 'Get-Label' -SkipModuleCheck -SkipComplianceSecurityFilter -Confirm:$false -ErrorAction Stop } |
                 Should -Throw '*could not identify the new session*'
+        }
+
+        It 'succeeds and disconnects correctly when the new connection genuinely has a fresh ConnectionId' {
+            $script:connectionCallCount = 0
+            Mock Get-ConnectionInformation -MockWith {
+                $script:connectionCallCount++
+                if ($script:connectionCallCount -eq 1)
+                {
+                    @()
+                }
+                else
+                {
+                    @([pscustomobject]@{ ConnectionId = 'genuinely-new'; TenantID = 'tenant-new' })
+                }
+            }
+
+            $result = Export-PurviewConfiguration -OutputPath $TestDrive -Command 'Get-Label' -SkipModuleCheck -SkipComplianceSecurityFilter -Confirm:$false
+
+            $result.Exported | Should -BeTrue
+            Should -Invoke Disconnect-ExchangeOnline -Times 1 -Exactly -ParameterFilter { $ConnectionId -eq 'genuinely-new' }
         }
     }
 

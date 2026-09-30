@@ -2,12 +2,14 @@
 function Get-NewConnectionInformation
 {
     # Diffs Get-ConnectionInformation against a before-connect snapshot to find the session a
-    # Connect-IPPSSession call just opened. If the diff finds nothing - Get-ConnectionInformation
-    # lagging the new session, or any other timing/filtering mismatch - falls back to the single
-    # connection now present only when that is unambiguous (exactly one). With more than one,
-    # guessing which ConnectionId is ours risks disconnecting the wrong session (or never
-    # disconnecting the real one) later, so this fails loudly instead of returning $null and
-    # silently leaving a live, untracked session connected.
+    # Connect-IPPSSession call just opened. Returns only a connection whose ConnectionId was NOT
+    # already present before connecting - never falls back to "the only connection present" or
+    # any other guess, because a Connect-IPPSSession call that silently reused or failed to
+    # replace an existing session would otherwise hand back that stale (possibly wrong-tenant)
+    # connection as if it were the one just opened, defeating the tenant-stamp safety check
+    # downstream by binding it to the wrong tenant's ConnectionId/TenantID. If no genuinely new
+    # ConnectionId is found - lag, a reused session, or any other mismatch - fails loudly instead
+    # of silently leaving a live, untracked (or misidentified) session connected.
     [CmdletBinding()]
     [OutputType([object])]
     param(
@@ -23,10 +25,5 @@ function Get-NewConnectionInformation
         return $newConnection
     }
 
-    if ($connections.Count -eq 1)
-    {
-        return $connections[0]
-    }
-
-    Write-Error -Message "Connected, but could not identify the new session's ConnectionId - Get-ConnectionInformation showed no new connection and $($connections.Count) connections are present, so which one is this function's own session cannot be determined safely." -Category ConnectionError -ErrorAction Stop
+    Write-Error -Message "Connected, but could not identify the new session's ConnectionId - Get-ConnectionInformation shows no connection that wasn't already present before connecting ($($connections.Count) total connections). Refusing to guess, since incorrectly reusing a prior session's identity could bind subsequent operations to the wrong tenant." -Category ConnectionError -ErrorAction Stop
 }
