@@ -1,2 +1,4 @@
 .DS_Store
 graphify-out/
+coverage.xml
+testResults.xml
