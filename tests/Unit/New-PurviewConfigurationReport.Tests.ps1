@@ -167,6 +167,19 @@ Describe 'New-PurviewConfigurationReport' {
             $html | Should -Match '</html>'
         }
 
+        It 'never emits a `<th> outside a `<tr>, and never the invalid `</BR> tag (regression for LOW HTML findings)' {
+            $thCount = ([regex]::Matches($html, '<th\b')).Count
+            $trThCount = ([regex]::Matches($html, '<tr><th\b')).Count
+            $trThCount | Should -Be $thCount
+            $html | Should -Not -Match '</BR>'
+        }
+
+        It 'never nests a `<tr> inside another `<tr> for a multi-setting label action (regression for LOW HTML finding)' {
+            # The label fixture's encrypt action has two settings (color, rightsdefinitions),
+            # which is exactly the rowspan case the original nested-<tr> bug produced.
+            $html | Should -Not -Match '<tr>\s*<td[^>]*>[^<]*</td>\s*<tr>'
+        }
+
         It 'renders the applycontentmarking label action' {
             $html | Should -Match 'markingtext'
             $html | Should -Match 'CONFIDENTIAL'
@@ -206,14 +219,26 @@ Describe 'New-PurviewConfigurationReport' {
             Should -Invoke Stop-Transcript -Times 1
         }
 
-        It 'does not call Stop-Transcript when -Transcript -WhatIf never actually started one' {
+        It 'does not call Start-Transcript or Stop-Transcript when -Transcript -WhatIf is specified' {
             $tenantPath = Get-TestSourcePath
             Mock Start-Transcript -MockWith {}
             Mock Stop-Transcript -MockWith {}
 
             New-PurviewConfigurationReport -SourcePath $tenantPath -Transcript -WhatIf
 
+            Should -Invoke Start-Transcript -Times 0
             Should -Invoke Stop-Transcript -Times 0
+        }
+
+        It 'warns and never calls Stop-Transcript when Start-Transcript itself fails' {
+            $tenantPath = Get-TestSourcePath
+            Mock Start-Transcript -MockWith { throw 'Access to the path is denied' }
+            Mock Stop-Transcript -MockWith {}
+
+            New-PurviewConfigurationReport -SourcePath $tenantPath -Transcript -Confirm:$false -WarningVariable capturedWarning -WarningAction SilentlyContinue
+
+            Should -Invoke Stop-Transcript -Times 0
+            $capturedWarning | Should -Not -BeNullOrEmpty
         }
     }
 }

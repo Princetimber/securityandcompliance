@@ -17,20 +17,16 @@ function New-PurviewConfigurationReport
 
     .PARAMETER SourcePath
         Folder containing the .xml files produced by Export-PurviewConfiguration.
-
     .PARAMETER HTMLReport
         Filename to write the HTML report to, relative to -SourcePath. Defaults to
         'Report.html'.
-
     .PARAMETER Transcript
         Start a PowerShell transcript alongside report generation.
-
     .PARAMETER TranscriptFileName
         Format string (year, month, day) for the transcript filename when -Transcript is used.
 
     .EXAMPLE
         New-PurviewConfigurationReport -SourcePath C:\output\MIP\ -HTMLReport Report.html
-
         Reads C:\output\MIP\*.xml and writes C:\output\MIP\Report.html.
 
     .OUTPUTS
@@ -83,7 +79,6 @@ function New-PurviewConfigurationReport
             Write-Verbose "Source data file not found, skipping: $sourceDataPath"
         }
     }
-
     function ConvertTo-MIPHashtable
     {
         # Converts an array of "[Setting1, Value1]" strings into a Setting->Value hashtable.
@@ -101,7 +96,6 @@ function New-PurviewConfigurationReport
         }
         return $data
     }
-
     function ConvertTo-SafeHtml
     {
         [CmdletBinding()]
@@ -119,7 +113,6 @@ function New-PurviewConfigurationReport
             [System.Net.WebUtility]::HtmlEncode([string]$InputObject)
         }
     }
-
     function ConvertTo-PropertyRowsHtml
     {
         # Renders "<tr><td>PropertyName</td><td>value</td></tr>" for each named property, in
@@ -139,7 +132,6 @@ function New-PurviewConfigurationReport
         }
         return ($rows -join '')
     }
-
     function ConvertTo-DetailSectionHtml
     {
         # Renders a simple "one table per object, one row per property" section for
@@ -167,7 +159,7 @@ function New-PurviewConfigurationReport
         foreach ($item in $Items)
         {
             $title = if ($item.PSObject.Properties.Name -contains $TitleProperty) { $item.$TitleProperty } else { '(unnamed)' }
-            $section.Add("<table align='center' style='width: 65%;'><th colspan=2>$(ConvertTo-SafeHtml $title)</th>")
+            $section.Add("<table align='center' style='width: 65%;'><tr><th colspan=2>$(ConvertTo-SafeHtml $title)</th></tr>")
             foreach ($property in $item.PSObject.Properties)
             {
                 if ($ExcludeProperty -contains $property.Name)
@@ -179,6 +171,53 @@ function New-PurviewConfigurationReport
             $section.Add('</table><br/>')
         }
         return ($section -join '')
+    }
+
+    function ConvertTo-LabelActionRowsHtml
+    {
+        # Renders one <tr> per setting for an encrypt/applycontentmarking label action, with
+        # the action-type cell rowspan'd across the first row only - never a <tr> nested inside
+        # another <tr>, which the original inline rendering produced and no browser accepts as
+        # valid HTML5.
+        [CmdletBinding()]
+        param(
+            [Parameter(Mandatory)]
+            [string]$ActionLabel,
+            [Parameter(Mandatory)]
+            [AllowNull()]
+            $Settings
+        )
+        $settingsList = @($Settings.GetEnumerator())
+        if ($settingsList.Count -eq 0)
+        {
+            return ''
+        }
+        $rows = [System.Collections.Generic.List[string]]::new()
+        $rowspan = $settingsList.Count
+        $isFirstRow = $true
+        foreach ($marking in $settingsList)
+        {
+            $actionLabelCell = if ($isFirstRow) { "<td rowspan='$rowspan'>$(ConvertTo-SafeHtml $ActionLabel)</td>" } else { '' }
+            if ($marking.Key -eq 'rightsdefinitions')
+            {
+                $definedRights = $marking.Value | ConvertFrom-Json
+                $rightsCells = if ($definedRights -is [array])
+                {
+                    ($definedRights | ForEach-Object { "$(ConvertTo-SafeHtml $_.Identity): $(ConvertTo-SafeHtml $_.Rights)<br/>" }) -join ''
+                }
+                else
+                {
+                    "$(ConvertTo-SafeHtml $definedRights.Identity): $(ConvertTo-SafeHtml $definedRights.Rights)<br/>"
+                }
+                $rows.Add("<tr>$actionLabelCell<td>Rights Definitions:</td><td>$rightsCells</td></tr>")
+            }
+            else
+            {
+                $rows.Add("<tr>$actionLabelCell<td>$(ConvertTo-SafeHtml $marking.Key):</td><td>$(ConvertTo-SafeHtml $marking.Value)</td></tr>")
+            }
+            $isFirstRow = $false
+        }
+        return ($rows -join '')
     }
 
     function ConvertTo-LabelSectionHtml
@@ -196,16 +235,15 @@ function New-PurviewConfigurationReport
             $labelSettings = ConvertTo-MIPHashtable -SourceArray $label.Settings
             $labelActions = $label.LabelActions | ConvertFrom-Json
             $labelLocaleSettings = $label.LocaleSettings | ConvertFrom-Json
-
             $output.Add("<table align='center' style='width: 65%;'>
-            <th colspan=4>$(ConvertTo-SafeHtml $label.displayname)</th>
+            <tr><th colspan=4>$(ConvertTo-SafeHtml $label.displayname)</th></tr>
             <tr><td style='width: 20%;'>Immutable Label Name</td><td style='width: 30%;'>$(ConvertTo-SafeHtml $label.name)</td><td style='width: 20%;'>Immutable Id</td><td style='width: 30%;'>$(ConvertTo-SafeHtml $label.ImmutableId)</td></tr>
             <tr><td>Display name</td><td>$(ConvertTo-SafeHtml $label.displayname)</td><td>Priority</td><td>$(ConvertTo-SafeHtml $label.Priority)</td></tr>
             <tr><td>Parent label display name</td><td>$(ConvertTo-SafeHtml $label.ParentLabelDisplayName)</td><td>Parent label ID</td><td>$(ConvertTo-SafeHtml $label.ParentId)</td></tr>
             <tr><td>Enabled</td><td>$(if (-not $label.Disabled) { 'True' } else { 'False' })</td></tr>
             <tr><td>Administration Comment</td><td colspan='3'>$(ConvertTo-SafeHtml $label.Comment)</td></tr>
             ")
-            $output.Add("<th class='subheading' colspan=4>Label Settings</th>
+            $output.Add("<tr><th class='subheading' colspan=4>Label Settings</th></tr>
             <tr><td>Tool tip</td><td colspan='3'>$(ConvertTo-SafeHtml $label.tooltip)</td></tr>
             <tr><td>Content Type</td><td>$(ConvertTo-SafeHtml $label.ContentType)</td></tr>
             <tr><td>Workload</td><td>$(ConvertTo-SafeHtml $label.Workload)</td></tr>
@@ -218,8 +256,7 @@ function New-PurviewConfigurationReport
                     $output.Add("<tr><td>$(ConvertTo-SafeHtml $labelSetting.Key)</td><td>$(ConvertTo-SafeHtml $labelSetting.Value)</td></tr>")
                 }
             }
-
-            $output.Add("<th class='subheading' colspan=4>Label Actions</th>
+            $output.Add("<tr><th class='subheading' colspan=4>Label Actions</th></tr>
             <tr><td colspan=1><b>Action Type</b></td><td colspan=1><b>Setting</b></td><td colspan=2><b>Value</b></td></tr>
             ")
             foreach ($action in $labelActions)
@@ -228,53 +265,15 @@ function New-PurviewConfigurationReport
                 {
                     'encrypt'
                     {
-                        $output.Add("
-                        <tr>
-                            <td rowspan='$($action.Settings.Count + 1)'>Content Encryption</td>
-                            $(
-                                foreach ($marking in $action.Settings.GetEnumerator()) {
-                                    if ($marking.Key -eq 'rightsdefinitions') {
-                                        "<tr>
-                                            <td>Rights Definitions:</td>
-                                            <td>"
-                                                $definedRights = $marking.Value | ConvertFrom-Json
-                                                if ($definedRights -is [array]) {
-                                                    foreach ($definedRight in $definedRights.GetEnumerator()) {
-                                                        "$(ConvertTo-SafeHtml $definedRight.Identity): $(ConvertTo-SafeHtml $definedRight.Rights)<br/>"
-                                                    }
-                                                } else {
-                                                    "$(ConvertTo-SafeHtml $definedRights.Identity): $(ConvertTo-SafeHtml $definedRights.Rights)<br/>"
-                                                }
-                                            "</td>
-                                        </tr>"
-                                    } else {
-                                        "<tr>
-                                            <td>$(ConvertTo-SafeHtml $marking.Key):</td><td>$(ConvertTo-SafeHtml $marking.Value)</td>
-                                        </tr>"
-                                    }
-                                }
-                            )
-                        </tr>")
+                        $output.Add((ConvertTo-LabelActionRowsHtml -ActionLabel 'Content Encryption' -Settings $action.Settings))
                     }
                     'applycontentmarking'
                     {
-                        $output.Add("
-                        <tr>
-                            <td rowspan='$($action.Settings.Count + 1)'>Apply Content Marking</td>
-                            $(
-                                foreach ($marking in $action.Settings.GetEnumerator()) {
-                                    "<tr>
-                                        <td>$(ConvertTo-SafeHtml $marking.Key):</td><td>$(ConvertTo-SafeHtml $marking.Value)</td>
-                                    </tr>"
-                                }
-                            )
-                        </tr>
-                        ")
+                        $output.Add((ConvertTo-LabelActionRowsHtml -ActionLabel 'Apply Content Marking' -Settings $action.Settings))
                     }
                 }
             }
-
-            $output.Add("<th class='subheading' colspan=4>Locale Settings</th>
+            $output.Add("<tr><th class='subheading' colspan=4>Locale Settings</th></tr>
             ")
             foreach ($localeSetting in $labelLocaleSettings)
             {
@@ -284,8 +283,7 @@ function New-PurviewConfigurationReport
                     }
                 )</td></tr></table></td></tr>")
             }
-
-            $output.Add("<th class='subheading' colspan=4>System Parameters</th>
+            $output.Add("<tr><th class='subheading' colspan=4>System Parameters</th></tr>
             ")
             $output.Add((ConvertTo-PropertyRowsHtml -Item $label -Property @('Policy', 'ReadOnly', 'ExternalIdentity', 'Mode', 'CreatedBy', 'LastModifiedBy', 'WhenChangedUTC', 'WhenCreatedUTC')))
             $output.Add("<tr><td>Identity</td><td colspan='3'>$(ConvertTo-SafeHtml $label.Identity)</td></tr>
@@ -308,21 +306,20 @@ function New-PurviewConfigurationReport
         foreach ($labelPolicy in $LabelPolicies)
         {
             $labelPolicySettings = ConvertTo-MIPHashtable -SourceArray $labelPolicy.Settings
-
             $output.Add("<table align='center' style='width: 65%;'>
-            <th colspan=3>$(ConvertTo-SafeHtml $labelPolicy.name)</th>
+            <tr><th colspan=3>$(ConvertTo-SafeHtml $labelPolicy.name)</th></tr>
             <tr><td style='width: 25%;'>Policy Name</td><td>$(ConvertTo-SafeHtml $labelPolicy.name)</td></tr>
             <tr><td>Priority</td><td>$(ConvertTo-SafeHtml $labelPolicy.Priority)</td></tr>
             <tr><td>Administration Comment</td><td>$(ConvertTo-SafeHtml $labelPolicy.Comment)</td></tr>
-            <tr><td>Published Labels</td><td>$($labelPolicy.Labels | ForEach-Object { "$(ConvertTo-SafeHtml $_)</BR>" })</td></tr>
+            <tr><td>Published Labels</td><td>$($labelPolicy.Labels | ForEach-Object { "$(ConvertTo-SafeHtml $_)<br/>" })</td></tr>
             ")
-            $output.Add("<th class='subheading' colspan=3>Advanced Settings</th>
+            $output.Add("<tr><th class='subheading' colspan=3>Advanced Settings</th></tr>
             ")
             foreach ($labelPolicySetting in $labelPolicySettings.GetEnumerator())
             {
                 $output.Add("<tr><td>$(ConvertTo-SafeHtml $labelPolicySetting.Key)</td><td>$(ConvertTo-SafeHtml $labelPolicySetting.Value)</td></tr>")
             }
-            $output.Add("<th class='subheading' colspan=3>Additional Settings</th>
+            $output.Add("<tr><th class='subheading' colspan=3>Additional Settings</th></tr>
             ")
             $output.Add((ConvertTo-PropertyRowsHtml -Item $labelPolicy -Property @('SharePointLocation', 'SharePointLocationException')))
             $output.Add("<tr><td>ExchangeLocation</td><td>$(ConvertTo-SafeHtml (($labelPolicy.ExchangeLocation | Select-Object -ExpandProperty Name) -join ', '))</td></tr>")
@@ -347,14 +344,14 @@ function New-PurviewConfigurationReport
         foreach ($dlpPolicy in $DlpPolicies)
         {
             $output.Add("<table align='center' style='width: 65%;'>
-            <th colspan=3>$(ConvertTo-SafeHtml $dlpPolicy.name)</th>
+            <tr><th colspan=3>$(ConvertTo-SafeHtml $dlpPolicy.name)</th></tr>
             <tr><td style='width: 25%;'>Policy Name</td><td>$(ConvertTo-SafeHtml $dlpPolicy.name)</td></tr>
             <tr><td>Priority</td><td>$(ConvertTo-SafeHtml $dlpPolicy.Priority)</td></tr>
             <tr><td>Administration Comment</td><td>$(ConvertTo-SafeHtml $dlpPolicy.Comment)</td></tr>
             <tr><td>Enabled</td><td>$(ConvertTo-SafeHtml $dlpPolicy.Enabled)</td></tr>
             <tr><td>Workload</td><td>$(ConvertTo-SafeHtml $dlpPolicy.Workload)</td></tr>
             ")
-            $output.Add("<th class='subheading' colspan=3>Policy Locations and Exceptions</th>
+            $output.Add("<tr><th class='subheading' colspan=3>Policy Locations and Exceptions</th></tr>
             ")
             $dlpPolicyLocationProperties = @(
                 'SharePointLocation', 'SharePointLocationException', 'ExchangeLocation', 'ExchangeOnPremisesLocation',
@@ -366,7 +363,7 @@ function New-PurviewConfigurationReport
                 'OneDriveLocation', 'OneDriveLocationException'
             )
             $output.Add((ConvertTo-PropertyRowsHtml -Item $dlpPolicy -Property $dlpPolicyLocationProperties))
-            $output.Add("<th class='subheading' colspan=3>Additional Settings</th>")
+            $output.Add("<tr><th class='subheading' colspan=3>Additional Settings</th></tr>")
             $output.Add((ConvertTo-PropertyRowsHtml -Item $dlpPolicy -Property @('DistributionStatus', 'DistributionResults', 'ReadOnly', 'ExternalIdentity', 'Mode', 'Type', 'CreatedBy', 'LastModifiedBy', 'WhenChangedUTC', 'WhenCreatedUTC', 'Identity')))
             $output.Add('</table><br/>')
         }
@@ -386,13 +383,13 @@ function New-PurviewConfigurationReport
         foreach ($dlpRule in $DlpRules)
         {
             $output.Add("<table align='center' style='width: 65%;'>
-            <th colspan=3>$(ConvertTo-SafeHtml $dlpRule.name)</th>
+            <tr><th colspan=3>$(ConvertTo-SafeHtml $dlpRule.name)</th></tr>
             <tr><td style='width: 25%;'>Policy Name</td><td>$(ConvertTo-SafeHtml $dlpRule.name)</td></tr>
             <tr><td>Priority</td><td>$(ConvertTo-SafeHtml $dlpRule.Priority)</td></tr>
             <tr><td>ParentPolicyName</td><td>$(ConvertTo-SafeHtml $dlpRule.ParentPolicyName)</td></tr>
             <tr><td>Administration Comment</td><td>$(ConvertTo-SafeHtml $dlpRule.Comment)</td></tr>
             ")
-            $output.Add("<th class='subheading' colspan=3>Additional Settings</th>")
+            $output.Add("<tr><th class='subheading' colspan=3>Additional Settings</th></tr>")
             $output.Add((ConvertTo-PropertyRowsHtml -Item $dlpRule -Property @('DistributionStatus', 'DistributionResults', 'ReadOnly', 'ExternalIdentity', 'Workload', 'Disabled', 'Mode', 'Type', 'CreatedBy', 'LastModifiedBy', 'WhenChangedUTC', 'WhenCreatedUTC', 'Identity')))
             $output.Add('</table><br/>')
         }
@@ -407,15 +404,21 @@ function New-PurviewConfigurationReport
     $transcriptStarted = $false
     try
     {
-        if ($Transcript)
+        if ($Transcript -and $PSCmdlet.ShouldProcess($transcriptPath, 'Start transcript'))
         {
-            Start-Transcript -Path $transcriptPath
-            # Start-Transcript honours -WhatIf itself and no-ops under it; only mark it started
-            # when it actually ran, otherwise the finally block below calls Stop-Transcript on a
-            # transcript that was never started and throws.
-            if (-not $WhatIfPreference)
+            # Own the ShouldProcess decision here rather than inferring it from $WhatIfPreference
+            # afterwards - that inference could not distinguish -WhatIf from a -Confirm decline,
+            # or from Start-Transcript failing outright (e.g. a path/permission error), any of
+            # which would still have left $transcriptStarted incorrectly $true and made the
+            # finally block below call Stop-Transcript on a transcript that never started.
+            try
             {
+                Start-Transcript -Path $transcriptPath -WhatIf:$false -Confirm:$false -ErrorAction Stop
                 $transcriptStarted = $true
+            }
+            catch
+            {
+                Write-Warning "Transcript not started: $($_.Exception.Message)"
             }
         }
 
@@ -453,13 +456,11 @@ function New-PurviewConfigurationReport
     }
 </style>
 </head>')
-
         $output.Add("
 <body>
 <h1 align='center'>Information Protection Configuration Report</h1>
 <h4 align='center' style='border-bottom: 1px lightblue solid; padding-bottom: 10px;'>Generated $(ConvertTo-SafeHtml (Get-Date -Format 'dd/MM/yyyy HH:mm'))</h4>
 ")
-
         $output.Add((ConvertTo-LabelSectionHtml -Labels (Get-SourceData -Path $SourcePath -Cmdlet 'Get-Label')))
         $output.Add((ConvertTo-LabelPolicySectionHtml -LabelPolicies (Get-SourceData -Path $SourcePath -Cmdlet 'Get-Labelpolicy')))
         $output.Add((ConvertTo-DetailSectionHtml -Heading 'Auto-Labeling Policies' -Items (Get-SourceData -Path $SourcePath -Cmdlet 'Get-AutoSensitivityLabelPolicy') -TitleProperty 'Name'))
@@ -481,7 +482,6 @@ function New-PurviewConfigurationReport
         $output.Add((ConvertTo-DetailSectionHtml -Heading 'Information Barrier Policies' -Items (Get-SourceData -Path $SourcePath -Cmdlet 'Get-InformationBarrierPolicy') -TitleProperty 'Name'))
         $output.Add((ConvertTo-DetailSectionHtml -Heading 'Insider Risk Policies' -Items (Get-SourceData -Path $SourcePath -Cmdlet 'Get-InsiderRiskPolicy') -TitleProperty 'Name'))
         $output.Add('</body></html>')
-
         $htmlReportPath = Join-Path -Path $SourcePath -ChildPath $HTMLReport
         if ($PSCmdlet.ShouldProcess($htmlReportPath, 'Write HTML report'))
         {
