@@ -11,6 +11,26 @@ Applies to `Invoke-PurviewConfigurationAudit`, and the two functions it wraps:
 requirements live in `Export-PurviewConfiguration`, via `Connect-IPPSSession`
 (Security & Compliance PowerShell).
 
+## Authentication methods
+
+`Export-PurviewConfiguration` (and `Invoke-PurviewConfigurationAudit`, which passes these
+through) supports four mutually exclusive authentication methods via `Connect-IPPSSession`:
+
+| Method | Parameters | Notes |
+|---|---|---|
+| Certificate, local store | `-CertificateThumbprint -AppId -Organization` | App-only. Windows only (`Cert:` provider). |
+| Certificate, PFX file | `-CertificateFilePath -CertificatePassword -AppId -Organization` | App-only. Cross-platform default for unattended runs. |
+| Bring-your-own token | `-AccessToken -Organization` | App-only or delegated depending on how the caller acquired the JWT (workload identity federation, a managed identity token exchange, or any other MSAL flow). This function never acquires or refreshes it. |
+| Default | none, or `-UserPrincipalName` | Fully interactive delegated sign-in. |
+
+`Connect-IPPSSession` has no managed-identity or device-code parameter of its own - a managed
+identity is only reachable by acquiring its token separately and passing it via `-AccessToken`.
+
+**Not verified against a live tenant**: whether `-EnableSearchOnlySession` (required for
+`Get-ComplianceSecurityFilter`) works under app-only (certificate/token) authentication, as
+opposed to only interactive/delegated. If it does not, skip that pass for app-only runs with
+`-SkipComplianceSecurityFilter`.
+
 ## Baseline role
 
 Required for most of the ~90 default cmdlets:

@@ -40,6 +40,14 @@ Describe 'Invoke-PurviewConfigurationAudit' {
                 $SourcePath -eq $TestDrive -and $HTMLReport -eq 'Custom.html'
             }
         }
+
+        It 'passes -AccessToken and -Organization through to Export-PurviewConfiguration' {
+            Invoke-PurviewConfigurationAudit -OutputPath $TestDrive -AccessToken 'fake.jwt.token' -Organization 'contoso.onmicrosoft.com' -Confirm:$false
+
+            Should -Invoke Export-PurviewConfiguration -Times 1 -ParameterFilter {
+                $AccessToken -eq 'fake.jwt.token' -and $Organization -eq 'contoso.onmicrosoft.com'
+            }
+        }
     }
 
     Context 'ShouldProcess / -WhatIf' {

@@ -13,9 +13,26 @@ function Export-PurviewConfiguration
         files, one file per cmdlet, under -OutputPath. Cmdlets not available to the
         connected account's role (see .NOTES) are skipped with a warning, not an error.
 
-        The caller must already be signed in to Security & Compliance PowerShell
-        (Connect-IPPSSession) before calling this function, or must be able to interactively
-        authenticate — Connect-IPPSSession is invoked from inside this function.
+        Four mutually exclusive authentication methods are available, strongest/most
+        unattended-friendly first - see .NOTES for the exact permissions each needs:
+            -CertificateThumbprint : app-only, certificate already in the local certificate
+                store. Windows only (the Cert: provider does not exist elsewhere).
+            -CertificateFilePath   : app-only, a PFX certificate file loaded at runtime. The
+                cross-platform default for unattended automation.
+            -AccessToken           : app-only or delegated, relays an OAuth JWT the caller
+                already acquired by any means (workload identity federation, a managed
+                identity token exchanged via Az, or any other MSAL flow). This function never
+                acquires or refreshes the token itself.
+            (default, no auth parameters) : fully interactive, delegated sign-in via
+                Connect-IPPSSession's own browser-based modern authentication. Optionally
+                pass -UserPrincipalName to skip the username prompt.
+        Connect-IPPSSession has no managed-identity or device-code parameter of its own (unlike
+        Connect-MgGraph) - a managed identity is only reachable by acquiring its token
+        separately and passing it via -AccessToken.
+
+        The same authentication method and parameters are reused for the dedicated
+        -EnableSearchOnlySession reconnect required by Get-ComplianceSecurityFilter (see
+        .NOTES), so an app-only run does not drop into an interactive prompt partway through.
 
         Requires membership of the Compliance Administrator or Compliance Data Administrator
         role (or an equivalent custom role) in the target tenant for the baseline cmdlet set —
@@ -23,6 +40,36 @@ function Export-PurviewConfiguration
 
     .PARAMETER OutputPath
         Folder to write the exported .xml files to. Created if it does not already exist.
+
+    .PARAMETER UserPrincipalName
+        Optional, default (interactive) authentication only. Account to sign in as - skips the
+        username prompt in the modern authentication dialog.
+
+    .PARAMETER CertificateThumbprint
+        App-only authentication using a certificate already in the caller's certificate store
+        (Cert:\CurrentUser\My or Cert:\LocalMachine\My). Windows only. Requires -AppId and
+        -Organization.
+
+    .PARAMETER CertificateFilePath
+        App-only authentication using a PFX certificate file loaded at runtime. Cross-platform.
+        Requires -CertificatePassword, -AppId, and -Organization.
+
+    .PARAMETER CertificatePassword
+        Password for the PFX file specified by -CertificateFilePath.
+
+    .PARAMETER AppId
+        Application (client) ID of the Entra app registration used for certificate-based
+        authentication. Required with -CertificateThumbprint or -CertificateFilePath.
+
+    .PARAMETER Organization
+        Primary .onmicrosoft.com domain of the target tenant. Required with
+        -CertificateThumbprint, -CertificateFilePath, or -AccessToken.
+
+    .PARAMETER AccessToken
+        A JWT access token the caller already acquired for Security & Compliance PowerShell,
+        by any method (workload identity federation, a managed identity token exchange, or any
+        other MSAL flow). Requires -Organization. This function never acquires, caches, or
+        refreshes this token itself.
 
     .PARAMETER Command
         Optional list of cmdlet names (matching the keys of the internal command table) to
@@ -41,8 +88,13 @@ function Export-PurviewConfiguration
     .EXAMPLE
         Export-PurviewConfiguration -OutputPath C:\output\MIP\
 
-        Connects to Security & Compliance PowerShell and exports the full default set of
-        configuration to C:\output\MIP\.
+        Connects interactively to Security & Compliance PowerShell and exports the full
+        default set of configuration to C:\output\MIP\.
+
+    .EXAMPLE
+        Export-PurviewConfiguration -OutputPath ./out -CertificateFilePath ./app.pfx -CertificatePassword (Get-Credential -UserName cert).Password -AppId $appId -Organization contoso.onmicrosoft.com
+
+        Unattended app-only export using a PFX certificate.
 
     .EXAMPLE
         Export-PurviewConfiguration -OutputPath ./out -Command 'Get-DlpCompliancePolicy','Get-DlpComplianceRule' -Verbose
@@ -88,11 +140,39 @@ function Export-PurviewConfiguration
         Get-ComplianceSecurityFilter requires a session opened with Connect-IPPSSession
         -EnableSearchOnlySession and ExchangeOnlineManagement v3.9.0+ (August 2025) — it
         cannot run alongside the rest of the export in the standard session. This function
-        runs it as a separate pass at the end: disconnects the standard session, reconnects
-        with -EnableSearchOnlySession, exports, and returns. Use -SkipComplianceSecurityFilter
-        to omit this pass entirely.
+        runs it as a separate pass at the end: disconnects only its own standard-session
+        connection (by ConnectionId, not a blind Disconnect-ExchangeOnline that would tear down
+        any other session the caller has open), reconnects with -EnableSearchOnlySession using
+        the same authentication parameters, exports, and disconnects that search-only
+        connection too before returning. Use -SkipComplianceSecurityFilter to omit this pass
+        entirely.
 
-        Required permissions and management roles:
+        Authentication methods (see .PARAMETER above for the exact parameters of each) and the
+        Entra/Purview permissions each needs:
+
+            -CertificateThumbprint / -CertificateFilePath (app-only, certificate-based auth):
+                The app registration (identified by -AppId) needs the Office 365 Exchange
+                Online API application permission "Exchange.ManageAsApp", and the connecting
+                service principal needs the same Microsoft Purview role assignments listed
+                below as a human account would (e.g. Compliance Administrator). Whether
+                -EnableSearchOnlySession is reachable under app-only auth has not been
+                verified against a live tenant by this function's author - if it is not,
+                Get-ComplianceSecurityFilter's dedicated pass will fail and should be skipped
+                with -SkipComplianceSecurityFilter for app-only runs until confirmed.
+
+            -AccessToken (bring-your-own-token, app-only or delegated depending on how the
+            caller acquired it): this function performs no permission check of its own - the
+            token's scopes/role assignments are whatever the caller's acquisition flow
+            (workload identity federation, a managed identity's exchanged token, etc.) granted.
+
+            Default (interactive delegated sign-in): governed entirely by the signed-in
+            account's own Entra ID / Purview role assignments, not by any parameter here.
+
+        None of the above has been verified against a live tenant by this function's author -
+        confirm behaviour, especially the -EnableSearchOnlySession + app-only combination,
+        before relying on it for unattended production automation.
+
+        Required permissions and management roles (interactive/delegated baseline):
         The connected account needs role assignments (Microsoft Purview role groups, or the
         equivalent Microsoft Entra ID admin roles) covering each functional area this
         function reads. Source: "Roles and role groups in Microsoft Defender for Office 365
@@ -170,7 +250,7 @@ function Export-PurviewConfiguration
     .LINK
         https://www.advania.co.uk
     #>
-    [CmdletBinding(SupportsShouldProcess)]
+    [CmdletBinding(SupportsShouldProcess, DefaultParameterSetName = 'Default')]
     [OutputType([pscustomobject])]
     param(
         [Parameter(
@@ -180,6 +260,31 @@ function Export-PurviewConfiguration
         )]
         [ValidateNotNullOrEmpty()]
         [string]$OutputPath,
+
+        [Parameter(ParameterSetName = 'Default')]
+        [string]$UserPrincipalName,
+
+        [Parameter(ParameterSetName = 'CertificateThumbprint', Mandatory = $true)]
+        [string]$CertificateThumbprint,
+
+        [Parameter(ParameterSetName = 'CertificateFilePath', Mandatory = $true)]
+        [ValidateScript({ Test-Path -Path $_ -PathType Leaf })]
+        [string]$CertificateFilePath,
+
+        [Parameter(ParameterSetName = 'CertificateFilePath', Mandatory = $true)]
+        [securestring]$CertificatePassword,
+
+        [Parameter(ParameterSetName = 'CertificateThumbprint', Mandatory = $true)]
+        [Parameter(ParameterSetName = 'CertificateFilePath', Mandatory = $true)]
+        [string]$AppId,
+
+        [Parameter(ParameterSetName = 'CertificateThumbprint', Mandatory = $true)]
+        [Parameter(ParameterSetName = 'CertificateFilePath', Mandatory = $true)]
+        [Parameter(ParameterSetName = 'AccessToken', Mandatory = $true)]
+        [string]$Organization,
+
+        [Parameter(ParameterSetName = 'AccessToken', Mandatory = $true)]
+        [string]$AccessToken,
 
         [Parameter()]
         [string[]]$Command,
@@ -249,10 +354,57 @@ function Export-PurviewConfiguration
             }
         }
 
+        # Build once, reused unmodified for both the standard session below and the
+        # -EnableSearchOnlySession reconnect later, so an app-only run never drops into an
+        # interactive prompt partway through for the Get-ComplianceSecurityFilter pass.
+        $connectParams = switch ($PSCmdlet.ParameterSetName)
+        {
+            'CertificateThumbprint'
+            {
+                if (-not $IsWindows)
+                {
+                    Write-Error -Message 'The -CertificateThumbprint parameter set requires the Windows certificate store (the Cert: provider) and is not supported on this platform. Use -CertificateFilePath instead.' -Category InvalidOperation -ErrorAction Stop
+                }
+                @{ CertificateThumbprint = $CertificateThumbprint; AppId = $AppId; Organization = $Organization }
+            }
+            'CertificateFilePath'
+            {
+                try
+                {
+                    $certificate = [System.Security.Cryptography.X509Certificates.X509Certificate2]::new($CertificateFilePath, $CertificatePassword)
+                }
+                catch
+                {
+                    Write-Error -Message "Failed to load certificate from '$CertificateFilePath': $($_.Exception.Message)" -Category SecurityError -ErrorAction Stop
+                }
+                if ($certificate.NotAfter -lt (Get-Date))
+                {
+                    Write-Error -Message "Certificate '$CertificateFilePath' expired on $($certificate.NotAfter)." -Category SecurityError -ErrorAction Stop
+                }
+                elseif ($certificate.NotAfter -lt (Get-Date).AddDays(30))
+                {
+                    Write-Warning "Certificate '$CertificateFilePath' expires on $($certificate.NotAfter) - within 30 days."
+                }
+                @{ CertificateFilePath = $CertificateFilePath; CertificatePassword = $CertificatePassword; AppId = $AppId; Organization = $Organization }
+            }
+            'AccessToken'
+            {
+                @{ AccessToken = $AccessToken; Organization = $Organization }
+            }
+            default
+            {
+                if ($UserPrincipalName) { @{ UserPrincipalName = $UserPrincipalName } } else { @{} }
+            }
+        }
+
         try
         {
-            Write-Verbose 'Connecting to Security & Compliance PowerShell'
-            Connect-IPPSSession -ErrorAction Stop
+            Write-Verbose "Connecting to Security & Compliance PowerShell (method: $($PSCmdlet.ParameterSetName))"
+            $priorConnectionIds = @(Get-ConnectionInformation -ErrorAction SilentlyContinue | Select-Object -ExpandProperty ConnectionId)
+            Connect-IPPSSession @connectParams -ErrorAction Stop
+            $standardConnectionId = Get-ConnectionInformation |
+                Where-Object { $_.ConnectionId -notin $priorConnectionIds } |
+                Select-Object -First 1 -ExpandProperty ConnectionId
         }
         catch
         {
@@ -460,11 +612,23 @@ function Export-PurviewConfiguration
             }
             else
             {
+                $searchConnectionId = $null
                 try
                 {
-                    Write-Verbose 'Reconnecting with -EnableSearchOnlySession for Get-ComplianceSecurityFilter'
-                    Disconnect-ExchangeOnline -Confirm:$false -ErrorAction SilentlyContinue
-                    Connect-IPPSSession -EnableSearchOnlySession -ErrorAction Stop
+                    Write-Verbose 'Reconnecting with -EnableSearchOnlySession for Get-ComplianceSecurityFilter, reusing the same authentication method'
+                    if ($standardConnectionId)
+                    {
+                        # Disconnect only the standard session this function itself opened -
+                        # never a blind Disconnect-ExchangeOnline, which would also tear down
+                        # any other Exchange Online/IPPS session the caller has open.
+                        Disconnect-ExchangeOnline -ConnectionId $standardConnectionId -Confirm:$false -ErrorAction SilentlyContinue
+                    }
+
+                    $priorConnectionIds = @(Get-ConnectionInformation -ErrorAction SilentlyContinue | Select-Object -ExpandProperty ConnectionId)
+                    Connect-IPPSSession @connectParams -EnableSearchOnlySession -ErrorAction Stop
+                    $searchConnectionId = Get-ConnectionInformation |
+                        Where-Object { $_.ConnectionId -notin $priorConnectionIds } |
+                        Select-Object -First 1 -ExpandProperty ConnectionId
 
                     $data = Get-ComplianceSecurityFilter -ErrorAction Stop
                     if ($data)
@@ -494,6 +658,14 @@ function Export-PurviewConfiguration
                         Command      = 'Get-ComplianceSecurityFilter'
                         RecordCount  = 0
                         Exported     = $false
+                    }
+                }
+                finally
+                {
+                    # Leave no search-only session connected behind on return, success or not.
+                    if ($searchConnectionId)
+                    {
+                        Disconnect-ExchangeOnline -ConnectionId $searchConnectionId -Confirm:$false -ErrorAction SilentlyContinue
                     }
                 }
             }

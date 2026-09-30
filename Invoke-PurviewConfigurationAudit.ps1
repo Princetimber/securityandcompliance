@@ -30,6 +30,31 @@ function Invoke-PurviewConfigurationAudit
         Filename to write the HTML report to, relative to -OutputPath. Defaults to
         'Report.html'.
 
+    .PARAMETER UserPrincipalName
+        Passed through to Export-PurviewConfiguration -UserPrincipalName (default/interactive
+        authentication only).
+
+    .PARAMETER CertificateThumbprint
+        Passed through to Export-PurviewConfiguration -CertificateThumbprint (app-only,
+        Windows certificate store). Requires -AppId and -Organization.
+
+    .PARAMETER CertificateFilePath
+        Passed through to Export-PurviewConfiguration -CertificateFilePath (app-only, PFX
+        file, cross-platform). Requires -CertificatePassword, -AppId, and -Organization.
+
+    .PARAMETER CertificatePassword
+        Passed through to Export-PurviewConfiguration -CertificatePassword.
+
+    .PARAMETER AppId
+        Passed through to Export-PurviewConfiguration -AppId.
+
+    .PARAMETER Organization
+        Passed through to Export-PurviewConfiguration -Organization.
+
+    .PARAMETER AccessToken
+        Passed through to Export-PurviewConfiguration -AccessToken (bring-your-own-token,
+        app-only or delegated). Requires -Organization.
+
     .PARAMETER Command
         Optional list of cmdlet names to export, instead of the full default set. Passed
         through to Export-PurviewConfiguration -Command.
@@ -75,7 +100,7 @@ function Invoke-PurviewConfigurationAudit
         comment-based help on each stage, including the Known Limitations note on
         identity-scoped cmdlets that are not included in the default export set.
     #>
-    [CmdletBinding(SupportsShouldProcess)]
+    [CmdletBinding(SupportsShouldProcess, DefaultParameterSetName = 'Default')]
     [OutputType([pscustomobject])]
     param(
         [Parameter(
@@ -88,6 +113,30 @@ function Invoke-PurviewConfigurationAudit
 
         [Parameter(Position = 1)]
         [string]$HTMLReport = 'Report.html',
+
+        [Parameter(ParameterSetName = 'Default')]
+        [string]$UserPrincipalName,
+
+        [Parameter(ParameterSetName = 'CertificateThumbprint', Mandatory = $true)]
+        [string]$CertificateThumbprint,
+
+        [Parameter(ParameterSetName = 'CertificateFilePath', Mandatory = $true)]
+        [string]$CertificateFilePath,
+
+        [Parameter(ParameterSetName = 'CertificateFilePath', Mandatory = $true)]
+        [securestring]$CertificatePassword,
+
+        [Parameter(ParameterSetName = 'CertificateThumbprint', Mandatory = $true)]
+        [Parameter(ParameterSetName = 'CertificateFilePath', Mandatory = $true)]
+        [string]$AppId,
+
+        [Parameter(ParameterSetName = 'CertificateThumbprint', Mandatory = $true)]
+        [Parameter(ParameterSetName = 'CertificateFilePath', Mandatory = $true)]
+        [Parameter(ParameterSetName = 'AccessToken', Mandatory = $true)]
+        [string]$Organization,
+
+        [Parameter(ParameterSetName = 'AccessToken', Mandatory = $true)]
+        [string]$AccessToken,
 
         [Parameter()]
         [string[]]$Command,
@@ -114,6 +163,31 @@ function Invoke-PurviewConfigurationAudit
 
         $exportParams = @{
             OutputPath = $OutputPath
+        }
+        switch ($PSCmdlet.ParameterSetName)
+        {
+            'CertificateThumbprint'
+            {
+                $exportParams.CertificateThumbprint = $CertificateThumbprint
+                $exportParams.AppId = $AppId
+                $exportParams.Organization = $Organization
+            }
+            'CertificateFilePath'
+            {
+                $exportParams.CertificateFilePath = $CertificateFilePath
+                $exportParams.CertificatePassword = $CertificatePassword
+                $exportParams.AppId = $AppId
+                $exportParams.Organization = $Organization
+            }
+            'AccessToken'
+            {
+                $exportParams.AccessToken = $AccessToken
+                $exportParams.Organization = $Organization
+            }
+            default
+            {
+                if ($UserPrincipalName) { $exportParams.UserPrincipalName = $UserPrincipalName }
+            }
         }
         if ($Command) { $exportParams.Command = $Command }
         if ($SkipModuleCheck) { $exportParams.SkipModuleCheck = $true }
