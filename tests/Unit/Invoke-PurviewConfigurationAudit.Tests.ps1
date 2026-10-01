@@ -49,6 +49,31 @@ Describe 'Invoke-PurviewConfigurationAudit' {
             }
         }
 
+        It 'passes -DeviceCode alone through to Export-PurviewConfiguration - no -Organization required' {
+            Invoke-PurviewConfigurationAudit -OutputPath $TestDrive -DeviceCode -Confirm:$false
+
+            Should -Invoke Export-PurviewConfiguration -Times 1 -ParameterFilter {
+                $DeviceCode -eq $true -and -not $Organization
+            }
+        }
+
+        It 'passes -DeviceCode and -Organization through to Export-PurviewConfiguration when overridden' {
+            Invoke-PurviewConfigurationAudit -OutputPath $TestDrive -DeviceCode -Organization 'contoso.onmicrosoft.com' -Confirm:$false
+
+            Should -Invoke Export-PurviewConfiguration -Times 1 -ParameterFilter {
+                $DeviceCode -eq $true -and $Organization -eq 'contoso.onmicrosoft.com'
+            }
+        }
+
+        It 'passes -Credential through to Export-PurviewConfiguration' {
+            $cred = [pscredential]::new('admin@contoso.onmicrosoft.com', (ConvertTo-SecureString 'P@ssw0rd!' -AsPlainText -Force))
+            Invoke-PurviewConfigurationAudit -OutputPath $TestDrive -Credential $cred -Confirm:$false
+
+            Should -Invoke Export-PurviewConfiguration -Times 1 -ParameterFilter {
+                $Credential -eq $cred
+            }
+        }
+
         It 'passes -Force through to Export-PurviewConfiguration (regression for MEDIUM finding: no way to retry a tenant-mismatched OutputPath via the wrapper)' {
             Invoke-PurviewConfigurationAudit -OutputPath $TestDrive -Force -Confirm:$false
 

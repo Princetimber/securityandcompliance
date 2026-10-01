@@ -55,6 +55,17 @@ function Invoke-PurviewConfigurationAudit
         Passed through to Export-PurviewConfiguration -AccessToken (bring-your-own-token,
         app-only or delegated). Requires -Organization.
 
+    .PARAMETER DeviceCode
+        Passed through to Export-PurviewConfiguration -DeviceCode (delegated OAuth device code
+        sign-in via Connect-ExchangeOnline's native -Device switch). Works standalone - no
+        other parameters required. Optionally combine with -Organization to target a specific
+        tenant instead of the multi-tenant endpoint. Always skips the
+        Get-ComplianceSecurityFilter pass - see Export-PurviewConfiguration's .NOTES.
+
+    .PARAMETER Credential
+        Passed through to Export-PurviewConfiguration -Credential (delegated username/password
+        sign-in, no interactive prompt). Optionally combine with -Organization.
+
     .PARAMETER Command
         Optional list of cmdlet names to export, instead of the full default set. Passed
         through to Export-PurviewConfiguration -Command.
@@ -105,6 +116,7 @@ function Invoke-PurviewConfigurationAudit
         comment-based help on each stage, including the Known Limitations note on
         identity-scoped cmdlets that are not included in the default export set.
     #>
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSReviewUnusedParameter', 'DeviceCode', Justification = 'Parameter-set discriminator only - selection happens via $PSCmdlet.ParameterSetName, not the switch value itself')]
     [CmdletBinding(SupportsShouldProcess, DefaultParameterSetName = 'Default')]
     [OutputType([pscustomobject])]
     param(
@@ -138,10 +150,18 @@ function Invoke-PurviewConfigurationAudit
         [Parameter(ParameterSetName = 'CertificateThumbprint', Mandatory = $true)]
         [Parameter(ParameterSetName = 'CertificateFilePath', Mandatory = $true)]
         [Parameter(ParameterSetName = 'AccessToken', Mandatory = $true)]
+        [Parameter(ParameterSetName = 'DeviceCode')]
+        [Parameter(ParameterSetName = 'Credential')]
         [string]$Organization,
 
         [Parameter(ParameterSetName = 'AccessToken', Mandatory = $true)]
         [string]$AccessToken,
+
+        [Parameter(ParameterSetName = 'DeviceCode', Mandatory = $true)]
+        [switch]$DeviceCode,
+
+        [Parameter(ParameterSetName = 'Credential', Mandatory = $true)]
+        [pscredential]$Credential,
 
         [Parameter()]
         [string[]]$Command,
@@ -191,6 +211,16 @@ function Invoke-PurviewConfigurationAudit
             {
                 $exportParams.AccessToken = $AccessToken
                 $exportParams.Organization = $Organization
+            }
+            'DeviceCode'
+            {
+                $exportParams.DeviceCode = $true
+                if ($Organization) { $exportParams.Organization = $Organization }
+            }
+            'Credential'
+            {
+                $exportParams.Credential = $Credential
+                if ($Organization) { $exportParams.Organization = $Organization }
             }
             default
             {

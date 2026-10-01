@@ -25,7 +25,9 @@ BeforeAll {
             [Parameter()]
             [string]$Organization,
             [Parameter()]
-            [string]$AccessToken
+            [string]$AccessToken,
+            [Parameter()]
+            [pscredential]$Credential
         )
     }
 
@@ -38,6 +40,25 @@ BeforeAll {
         param(
             [Parameter()]
             [string[]]$ConnectionId
+        )
+    }
+
+    function Connect-ExchangeOnline
+    {
+        # -DeviceCode calls this directly (bypassing Connect-IPPSSession, which only exposes
+        # -Device inside Azure Cloud Shell), with the same -ConnectionUri Connect-IPPSSession
+        # itself hardcodes for Security & Compliance PowerShell.
+        [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSReviewUnusedParameter', '', Justification = 'Stub signature only, mocked in tests below')]
+        [CmdletBinding()]
+        param(
+            [Parameter()]
+            [string]$ConnectionUri,
+            [Parameter()]
+            [string]$AzureADAuthorizationEndpointUri,
+            [Parameter()]
+            [switch]$Device,
+            [Parameter()]
+            [switch]$ShowBanner
         )
     }
 
@@ -111,6 +132,7 @@ BeforeAll {
     . "$PSScriptRoot/../../source/Public/Export-PurviewConfiguration.ps1"
 
     Mock Connect-IPPSSession -MockWith {}
+    Mock Connect-ExchangeOnline -MockWith {}
     Mock Disconnect-ExchangeOnline -MockWith {}
     Mock Export-Clixml -MockWith {}
 }
@@ -305,6 +327,53 @@ Describe 'Export-PurviewConfiguration' {
 
             Should -Invoke Connect-IPPSSession -Times 1 -ParameterFilter {
                 $AccessToken -eq 'fake.jwt.token' -and $Organization -eq 'contoso.onmicrosoft.com'
+            }
+        }
+
+        It 'works standalone with just -DeviceCode - connects via Connect-ExchangeOnline -Device, not Connect-IPPSSession' {
+            $null = Export-PurviewConfiguration -OutputPath $TestDrive -DeviceCode -Command 'Get-Label' -SkipModuleCheck -SkipComplianceSecurityFilter -Confirm:$false
+
+            Should -Invoke Connect-ExchangeOnline -Times 1 -ParameterFilter {
+                $Device -eq $true -and $ConnectionUri -eq 'https://ps.compliance.protection.outlook.com/PowerShell-LiveId' -and -not $AzureADAuthorizationEndpointUri
+            }
+            Should -Invoke Connect-IPPSSession -Times 0
+        }
+
+        It 'passes -Organization through to target a specific tenant''s authorization endpoint' {
+            $null = Export-PurviewConfiguration -OutputPath $TestDrive -DeviceCode -Organization 'contoso.onmicrosoft.com' -Command 'Get-Label' -SkipModuleCheck -SkipComplianceSecurityFilter -Confirm:$false
+
+            Should -Invoke Connect-ExchangeOnline -Times 1 -ParameterFilter {
+                $Device -eq $true -and $AzureADAuthorizationEndpointUri -eq 'https://login.microsoftonline.com/contoso.onmicrosoft.com'
+            }
+        }
+
+        It 'skips Get-ComplianceSecurityFilter under -DeviceCode even when requested' {
+            Mock Get-Module -ParameterFilter { $Name -eq 'ExchangeOnlineManagement' -and -not $ListAvailable } -MockWith {
+                [pscustomobject]@{ Name = 'ExchangeOnlineManagement'; Version = [version]'3.9.0' }
+            }
+
+            $result = Export-PurviewConfiguration -OutputPath $TestDrive -DeviceCode -Command 'Get-ComplianceSecurityFilter' -SkipModuleCheck -Confirm:$false -WarningAction SilentlyContinue
+
+            $result.Command | Should -Be 'Get-ComplianceSecurityFilter'
+            $result.Exported | Should -BeFalse
+            Should -Invoke Connect-ExchangeOnline -Times 1
+        }
+
+        It 'passes -Credential through, with -Organization when supplied' {
+            $cred = [pscredential]::new('admin@contoso.onmicrosoft.com', (ConvertTo-SecureString 'P@ssw0rd!' -AsPlainText -Force))
+            $null = Export-PurviewConfiguration -OutputPath $TestDrive -Credential $cred -Organization 'contoso.onmicrosoft.com' -Command 'Get-Label' -SkipModuleCheck -SkipComplianceSecurityFilter -Confirm:$false
+
+            Should -Invoke Connect-IPPSSession -Times 1 -ParameterFilter {
+                $Credential -eq $cred -and $Organization -eq 'contoso.onmicrosoft.com'
+            }
+        }
+
+        It 'passes -Credential through with no -Organization when not supplied' {
+            $cred = [pscredential]::new('admin@contoso.onmicrosoft.com', (ConvertTo-SecureString 'P@ssw0rd!' -AsPlainText -Force))
+            $null = Export-PurviewConfiguration -OutputPath $TestDrive -Credential $cred -Command 'Get-Label' -SkipModuleCheck -SkipComplianceSecurityFilter -Confirm:$false
+
+            Should -Invoke Connect-IPPSSession -Times 1 -ParameterFilter {
+                $Credential -eq $cred -and -not $Organization
             }
         }
     }

@@ -21,7 +21,7 @@ function Export-PurviewConfiguration
         files, one file per cmdlet, under -OutputPath. Cmdlets not available to the
         connected account's role (see .NOTES) are skipped with a warning, not an error.
 
-        Four mutually exclusive authentication methods are available, strongest/most
+        Six mutually exclusive authentication methods are available, strongest/most
         unattended-friendly first - see .NOTES for the exact permissions each needs:
             -CertificateThumbprint : app-only, certificate already in the local certificate
                 store. Windows only (the Cert: provider does not exist elsewhere).
@@ -31,12 +31,30 @@ function Export-PurviewConfiguration
                 already acquired by any means (workload identity federation, a managed
                 identity token exchanged via Az, or any other MSAL flow). This function never
                 acquires or refreshes the token itself.
+            -DeviceCode            : delegated, OAuth device code flow for hosts with no local
+                browser (SSH sessions, containers). Works standalone - just -DeviceCode, nothing
+                else required: prints a URL and a short code, and sign-in (credential entry,
+                MFA) happens entirely in a browser on any device. Connect-IPPSSession is itself
+                a thin wrapper around Connect-ExchangeOnline -ConnectionUri
+                'https://ps.compliance.protection.outlook.com/PowerShell-LiveId' that only
+                exposes Connect-ExchangeOnline's native -Device switch inside Azure Cloud
+                Shell - this function calls Connect-ExchangeOnline directly, with the same
+                Security & Compliance -ConnectionUri, to reach that same native device-code
+                path everywhere else: Microsoft's own pre-consented first-party client and
+                token handling, not a custom app registration or a third-party MSAL library.
+                Optionally pass -Organization (your tenant's .onmicrosoft.com domain) to sign in
+                against that specific tenant instead of the multi-tenant 'organizations'
+                endpoint. KNOWN LIMITATION: Get-ComplianceSecurityFilter's dedicated
+                -EnableSearchOnlySession reconnect (see below) is wired internally by
+                Connect-IPPSSession itself, via a variable this function cannot set from
+                outside that cmdlet - so under -DeviceCode that pass is always skipped with a
+                warning, equivalent to -SkipComplianceSecurityFilter, regardless of -Command.
+            -Credential             : delegated, username/password sign-in with no interactive
+                prompt. Requires an account not enforced for MFA/Conditional Access-blocked
+                legacy auth, or this fails. Optionally pass -Organization.
             (default, no auth parameters) : fully interactive, delegated sign-in via
                 Connect-IPPSSession's own browser-based modern authentication. Optionally
                 pass -UserPrincipalName to skip the username prompt.
-        Connect-IPPSSession has no managed-identity or device-code parameter of its own (unlike
-        Connect-MgGraph) - a managed identity is only reachable by acquiring its token
-        separately and passing it via -AccessToken.
 
         The same authentication method and parameters are reused for the dedicated
         -EnableSearchOnlySession reconnect required by Get-ComplianceSecurityFilter (see
@@ -71,13 +89,26 @@ function Export-PurviewConfiguration
         Application (client) ID of the Entra app registration used for certificate-based
         authentication. Required with -CertificateThumbprint or -CertificateFilePath.
     .PARAMETER Organization
-        Primary .onmicrosoft.com domain of the target tenant. Required with
-        -CertificateThumbprint, -CertificateFilePath, or -AccessToken.
+        Primary .onmicrosoft.com domain of the target tenant (Connect-IPPSSession requires this
+        exact form - not a tenant ID GUID). Required with -CertificateThumbprint,
+        -CertificateFilePath, or -AccessToken. Optional with -DeviceCode (signs in against that
+        specific tenant instead of the multi-tenant endpoint) or -Credential.
     .PARAMETER AccessToken
         A JWT access token the caller already acquired for Security & Compliance PowerShell,
         by any method (workload identity federation, a managed identity token exchange, or any
         other MSAL flow). Requires -Organization. This function never acquires, caches, or
         refreshes this token itself.
+    .PARAMETER DeviceCode
+        Switch to use delegated OAuth device code sign-in - prints a code and verification URL
+        to complete sign-in on any device with a browser (credential entry and MFA happen
+        there, not on this host). Works alone, with no other parameters required - calls
+        Connect-ExchangeOnline's native -Device switch directly (Microsoft's own pre-consented
+        client), not a custom app registration or third-party library. Skips the
+        Get-ComplianceSecurityFilter pass automatically - see .NOTES.
+    .PARAMETER Credential
+        PSCredential for delegated username/password sign-in with no interactive prompt. Fails
+        for accounts enforced for MFA or blocked by Conditional Access for legacy/basic auth.
+        Optionally combine with -Organization.
     .PARAMETER Command
         Optional list of cmdlet names (matching the keys of the internal command table) to
         run, instead of the full default set. Use this to re-run/target a subset, e.g. after
@@ -105,6 +136,19 @@ function Export-PurviewConfiguration
         Export-PurviewConfiguration -OutputPath ./out -CertificateFilePath ./app.pfx -CertificatePassword (Get-Credential -UserName cert).Password -AppId $appId -Organization contoso.onmicrosoft.com
 
         Unattended app-only export using a PFX certificate.
+
+    .EXAMPLE
+        Export-PurviewConfiguration -OutputPath ./out -DeviceCode
+
+        Delegated sign-in via OAuth device code flow - prints a code and URL to complete
+        sign-in (credentials and MFA) in a browser on any device. Useful on hosts with no
+        local browser (SSH sessions, containers). No -AppId or -Organization needed.
+
+    .EXAMPLE
+        Export-PurviewConfiguration -OutputPath ./out -Credential (Get-Credential)
+
+        Delegated sign-in with a username/password credential, no interactive prompt. Fails
+        for accounts enforced for MFA or blocked by Conditional Access for legacy auth.
 
     .EXAMPLE
         Export-PurviewConfiguration -OutputPath ./out -Command 'Get-DlpCompliancePolicy','Get-DlpComplianceRule' -Verbose
@@ -155,9 +199,21 @@ function Export-PurviewConfiguration
         Entra/Purview permissions each needs, and the interactive/delegated baseline role
         matrix are all in LEAST-PRIVILEGE.md's "Authentication methods" and "Baseline role"
         sections - including the confirmed "Exchange.ManageAsApp" application permission for
-        the two certificate-based methods, and the explicit note that none of the four
+        the two certificate-based methods, and the explicit note that none of the six
         authentication methods (least of all -EnableSearchOnlySession under app-only auth)
         have been verified against a live tenant by this function's author.
+        Compliance Administrator (or Compliance Data Administrator) alone is sufficient to
+        execute this function end-to-end without a terminating error. Role groups it doesn't
+        cover - Organization Management (Get-RoleGroup/Get-ManagementRole/
+        Get-SecurityPrincipal/Get-OrganizationSegment), eDiscovery Manager/Administrator
+        (Get-ComplianceSecurityFilter and the other eDiscovery cmdlets), Global Reader/Intune
+        (Get-Device*) - just degrade those specific cmdlets to a Write-Warning via the
+        CommandNotFoundException handling in Invoke-ExportCommand; they do not fail the run.
+        Security Administrator is NOT an adequate substitute for the Compliance Administrator
+        baseline: it only happens to cover a few individual sections (Information Barriers,
+        Audit config, Quarantine/mail filter reporting) and would leave most of the default
+        cmdlet set (DLP, Retention, Information Protection, Insider Risk) skipped with
+        warnings. See LEAST-PRIVILEGE.md's "True minimum for a narrow run" section.
         Source: "Roles and role groups in Microsoft Defender for Office 365 and Microsoft
         Purview" (https://learn.microsoft.com/microsoft-365/security/office-365-security/scc-permissions).
 
@@ -166,6 +222,7 @@ function Export-PurviewConfiguration
     .LINK
         https://www.advania.co.uk
     #>
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSReviewUnusedParameter', 'DeviceCode', Justification = 'Parameter-set discriminator only - selection happens via $PSCmdlet.ParameterSetName, not the switch value itself')]
     [CmdletBinding(SupportsShouldProcess, DefaultParameterSetName = 'Default')]
     [OutputType([pscustomobject])]
     param(
@@ -191,9 +248,15 @@ function Export-PurviewConfiguration
         [Parameter(ParameterSetName = 'CertificateThumbprint', Mandatory = $true)]
         [Parameter(ParameterSetName = 'CertificateFilePath', Mandatory = $true)]
         [Parameter(ParameterSetName = 'AccessToken', Mandatory = $true)]
+        [Parameter(ParameterSetName = 'DeviceCode')]
+        [Parameter(ParameterSetName = 'Credential')]
         [string]$Organization,
         [Parameter(ParameterSetName = 'AccessToken', Mandatory = $true)]
         [string]$AccessToken,
+        [Parameter(ParameterSetName = 'DeviceCode', Mandatory = $true)]
+        [switch]$DeviceCode,
+        [Parameter(ParameterSetName = 'Credential', Mandatory = $true)]
+        [pscredential]$Credential,
         [Parameter()]
         [string[]]$Command,
         [Parameter()]
@@ -359,6 +422,21 @@ function Export-PurviewConfiguration
         {
             @{ AccessToken = $AccessToken; Organization = $Organization }
         }
+        'DeviceCode'
+        {
+            # Connect-IPPSSession is itself a thin wrapper around Connect-ExchangeOnline with
+            # this exact -ConnectionUri, but only exposes -Device (native device-code sign-in)
+            # inside Azure Cloud Shell. Calling Connect-ExchangeOnline directly, with the same
+            # -ConnectionUri, reaches that same native path everywhere else - Microsoft's own
+            # pre-consented first-party client, not a custom app registration or MSAL library.
+            $deviceConnectParams = @{ ConnectionUri = 'https://ps.compliance.protection.outlook.com/PowerShell-LiveId'; Device = $true; ShowBanner = $false }
+            if ($Organization) { $deviceConnectParams.AzureADAuthorizationEndpointUri = "https://login.microsoftonline.com/$Organization" }
+            $deviceConnectParams
+        }
+        'Credential'
+        {
+            if ($Organization) { @{ Credential = $Credential; Organization = $Organization } } else { @{ Credential = $Credential } }
+        }
         default
         {
             if ($UserPrincipalName) { @{ UserPrincipalName = $UserPrincipalName } } else { @{} }
@@ -368,7 +446,14 @@ function Export-PurviewConfiguration
     {
         Write-Verbose "Connecting to Security & Compliance PowerShell (method: $($PSCmdlet.ParameterSetName))"
         $priorConnectionIds = @(Get-ConnectionInformation -ErrorAction SilentlyContinue | Select-Object -ExpandProperty ConnectionId)
-        Connect-IPPSSession @connectParams -ErrorAction Stop
+        if ($PSCmdlet.ParameterSetName -eq 'DeviceCode')
+        {
+            Connect-ExchangeOnline @connectParams -ErrorAction Stop
+        }
+        else
+        {
+            Connect-IPPSSession @connectParams -ErrorAction Stop
+        }
         $standardConnection = Get-NewConnectionInformation -PriorConnectionIds $priorConnectionIds
         $standardConnectionId = $standardConnection.ConnectionId
         $tenantId = $standardConnection.TenantID
@@ -408,10 +493,14 @@ function Export-PurviewConfiguration
         # fails (e.g. account lacks eDiscovery Administrator).
         if ((-not $Command -or $Command -contains 'Get-ComplianceSecurityFilter') -and -not $SkipComplianceSecurityFilter)
         {
-            $searchSessionModule = Get-Module -Name ExchangeOnlineManagement | Sort-Object -Property Version -Descending | Select-Object -First 1
-            if ($searchSessionModule -and $searchSessionModule.Version -lt [version]'3.9.0')
+            if ($PSCmdlet.ParameterSetName -eq 'DeviceCode')
             {
-                Write-Warning "Get-ComplianceSecurityFilter requires ExchangeOnlineManagement v3.9.0 or later (loaded: $($searchSessionModule.Version)). Skipping. Update the module, then re-run with -Command 'Get-ComplianceSecurityFilter' to retry just this cmdlet."
+                # -EnableSearchOnlySession is wired by Connect-IPPSSession into a module-private
+                # script-scoped variable that only Connect-IPPSSession itself (running inside
+                # ExchangeOnlineManagement) can set - calling Connect-ExchangeOnline directly, as
+                # -DeviceCode does, cannot reach it. No known way to run this pass under
+                # -DeviceCode; always skipped, same as -SkipComplianceSecurityFilter.
+                Write-Warning 'Get-ComplianceSecurityFilter requires a dedicated -EnableSearchOnlySession reconnect, which is not reachable through -DeviceCode (see .NOTES). Skipping. Use a different authentication method to include this cmdlet, or pass -SkipComplianceSecurityFilter to silence this warning.'
                 [pscustomobject]@{
                     Command     = 'Get-ComplianceSecurityFilter'
                     RecordCount = 0
@@ -420,59 +509,72 @@ function Export-PurviewConfiguration
             }
             else
             {
-                $searchConnectionId = $null
-                try
+                $searchSessionModule = Get-Module -Name ExchangeOnlineManagement | Sort-Object -Property Version -Descending | Select-Object -First 1
+                if ($searchSessionModule -and $searchSessionModule.Version -lt [version]'3.9.0')
                 {
-                    Write-Verbose 'Reconnecting with -EnableSearchOnlySession for Get-ComplianceSecurityFilter, reusing the same authentication method'
-                    if ($standardConnectionId)
-                    {
-                        # Disconnect only the standard session this function itself opened -
-                        # never a blind Disconnect-ExchangeOnline, which would also tear down
-                        # any other Exchange Online/IPPS session the caller has open.
-                        Disconnect-ExchangeOnline -ConnectionId $standardConnectionId -Confirm:$false -ErrorAction SilentlyContinue
-                        # Cleared so the outer finally below doesn't attempt a second disconnect
-                        # of a session already gone.
-                        $standardConnectionId = $null
-                    }
-                    $priorConnectionIds = @(Get-ConnectionInformation -ErrorAction SilentlyContinue | Select-Object -ExpandProperty ConnectionId)
-                    Connect-IPPSSession @connectParams -EnableSearchOnlySession -ErrorAction Stop
-                    $searchConnectionId = (Get-NewConnectionInformation -PriorConnectionIds $priorConnectionIds).ConnectionId
-                    $data = Get-ComplianceSecurityFilter -ErrorAction Stop
-                    if ($data)
-                    {
-                        Write-Verbose 'Exporting data generated by Get-ComplianceSecurityFilter'
-                        $wasExported = Export-ComplianceDataFile -CmdletName 'Get-ComplianceSecurityFilter' -Data $data -Destination $OutputPath
-                        [pscustomobject]@{
-                            Command     = 'Get-ComplianceSecurityFilter'
-                            RecordCount = @($data).Count
-                            Exported    = $wasExported
-                        }
-                    }
-                    else
-                    {
-                        Write-Warning 'No data generated by Get-ComplianceSecurityFilter'
-                        [pscustomobject]@{
-                            Command     = 'Get-ComplianceSecurityFilter'
-                            RecordCount = 0
-                            Exported    = $false
-                        }
-                    }
-                }
-                catch
-                {
-                    Write-Error -Message "Get-ComplianceSecurityFilter failed: $($_.Exception.Message). Requires the eDiscovery Administrator role (see .NOTES) in addition to Compliance/Security Administrator."
+                    Write-Warning "Get-ComplianceSecurityFilter requires ExchangeOnlineManagement v3.9.0 or later (loaded: $($searchSessionModule.Version)). Skipping. Update the module, then re-run with -Command 'Get-ComplianceSecurityFilter' to retry just this cmdlet."
                     [pscustomobject]@{
                         Command     = 'Get-ComplianceSecurityFilter'
                         RecordCount = 0
                         Exported    = $false
                     }
                 }
-                finally
+                else
                 {
-                    # Leave no search-only session connected behind on return, success or not.
-                    if ($searchConnectionId)
+                    $searchConnectionId = $null
+                    try
                     {
-                        Disconnect-ExchangeOnline -ConnectionId $searchConnectionId -Confirm:$false -ErrorAction SilentlyContinue
+                        Write-Verbose 'Reconnecting with -EnableSearchOnlySession for Get-ComplianceSecurityFilter, reusing the same authentication method'
+                        if ($standardConnectionId)
+                        {
+                            # Disconnect only the standard session this function itself opened -
+                            # never a blind Disconnect-ExchangeOnline, which would also tear down
+                            # any other Exchange Online/IPPS session the caller has open.
+                            Disconnect-ExchangeOnline -ConnectionId $standardConnectionId -Confirm:$false -ErrorAction SilentlyContinue
+                            # Cleared so the outer finally below doesn't attempt a second disconnect
+                            # of a session already gone.
+                            $standardConnectionId = $null
+                        }
+                        $priorConnectionIds = @(Get-ConnectionInformation -ErrorAction SilentlyContinue | Select-Object -ExpandProperty ConnectionId)
+                        Connect-IPPSSession @connectParams -EnableSearchOnlySession -ErrorAction Stop
+                        $searchConnectionId = (Get-NewConnectionInformation -PriorConnectionIds $priorConnectionIds).ConnectionId
+                        $data = Get-ComplianceSecurityFilter -ErrorAction Stop
+                        if ($data)
+                        {
+                            Write-Verbose 'Exporting data generated by Get-ComplianceSecurityFilter'
+                            $wasExported = Export-ComplianceDataFile -CmdletName 'Get-ComplianceSecurityFilter' -Data $data -Destination $OutputPath
+                            [pscustomobject]@{
+                                Command     = 'Get-ComplianceSecurityFilter'
+                                RecordCount = @($data).Count
+                                Exported    = $wasExported
+                            }
+                        }
+                        else
+                        {
+                            Write-Warning 'No data generated by Get-ComplianceSecurityFilter'
+                            [pscustomobject]@{
+                                Command     = 'Get-ComplianceSecurityFilter'
+                                RecordCount = 0
+                                Exported    = $false
+                            }
+                        }
+                    }
+                    catch
+                    {
+                        Write-Error -Message "Get-ComplianceSecurityFilter failed: $($_.Exception.Message). Requires the eDiscovery Administrator role (see .NOTES) in addition to Compliance/Security Administrator."
+                        [pscustomobject]@{
+                            Command     = 'Get-ComplianceSecurityFilter'
+                            RecordCount = 0
+                            Exported    = $false
+                        }
+                    }
+                    finally
+                    {
+                        # Leave no search-only session connected behind on return, success or not.
+                        if ($searchConnectionId)
+                        {
+                            Disconnect-ExchangeOnline -ConnectionId $searchConnectionId -Confirm:$false -ErrorAction SilentlyContinue
+                        }
                     }
                 }
             }

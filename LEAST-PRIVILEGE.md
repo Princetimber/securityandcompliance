@@ -14,17 +14,28 @@ requirements live in `Export-PurviewConfiguration`, via `Connect-IPPSSession`
 ## Authentication methods
 
 `Export-PurviewConfiguration` (and `Invoke-PurviewConfigurationAudit`, which passes these
-through) supports four mutually exclusive authentication methods via `Connect-IPPSSession`:
+through) supports six mutually exclusive authentication methods, five via
+`Connect-IPPSSession` directly and one (`-DeviceCode`) via `Connect-ExchangeOnline` with the
+same Security & Compliance `-ConnectionUri` (see below):
 
 | Method | Parameters | Notes |
 |---|---|---|
 | Certificate, local store | `-CertificateThumbprint -AppId -Organization` | App-only. Windows only (`Cert:` provider). |
 | Certificate, PFX file | `-CertificateFilePath -CertificatePassword -AppId -Organization` | App-only. Cross-platform default for unattended runs. |
 | Bring-your-own token | `-AccessToken -Organization` | App-only or delegated depending on how the caller acquired the JWT (workload identity federation, a managed identity token exchange, or any other MSAL flow). This function never acquires or refreshes it. |
+| Device code | `-DeviceCode` (standalone; `-Organization` optional override) | Delegated. Connects via `Connect-ExchangeOnline`'s native `-Device` switch directly (same `-ConnectionUri` Connect-IPPSSession itself hardcodes for Security & Compliance PowerShell), using Microsoft's own pre-consented first-party client - no custom app registration or third-party auth library. For hosts with no local browser; sign-in happens in a browser on any device. Skips the `Get-ComplianceSecurityFilter` pass automatically (see below). |
+| Credential | `-Credential`, optionally `-Organization` | Delegated username/password, no interactive prompt. Fails for MFA-enforced or Conditional-Access-blocked-legacy-auth accounts. |
 | Default | none, or `-UserPrincipalName` | Fully interactive delegated sign-in. |
 
-`Connect-IPPSSession` has no managed-identity or device-code parameter of its own - a managed
-identity is only reachable by acquiring its token separately and passing it via `-AccessToken`.
+`Connect-IPPSSession` has no managed-identity parameter of its own - a managed identity is
+only reachable by acquiring its token separately and passing it via `-AccessToken`.
+`Connect-IPPSSession` is itself a thin wrapper around `Connect-ExchangeOnline -ConnectionUri
+'https://ps.compliance.protection.outlook.com/PowerShell-LiveId'`, and does have a native
+device-code path (`Connect-ExchangeOnline -Device`) - but only exposes that switch to its own
+caller inside Azure Cloud Shell. `-DeviceCode` calls `Connect-ExchangeOnline` directly with the
+same `-ConnectionUri` to reach that native path everywhere else (confirmed by reading
+`(Get-Command Connect-IPPSSession).Definition` against the installed
+ExchangeOnlineManagement 3.10.1 module).
 
 **Not verified against a live tenant**: whether `-EnableSearchOnlySession` (required for
 `Get-ComplianceSecurityFilter`) works under app-only (certificate/token) authentication, as
@@ -48,6 +59,40 @@ account would (e.g. Compliance Administrator).
 `-AccessToken`: this function performs no permission check of its own - the token's
 scopes/role assignments are whatever the caller's acquisition flow (workload identity
 federation, a managed identity's exchanged token, etc.) granted.
+
+### Device code method
+
+`-DeviceCode`: delegated sign-in, so governed by the signing-in account's own Entra ID /
+Purview role assignments, same as the default interactive method. Works standalone - no
+`-AppId` involved at all, since this calls `Connect-ExchangeOnline -Device` directly rather
+than acquiring a token itself: Microsoft's own pre-consented first-party client handles
+authentication the same way the default interactive method does, just via a device code
+instead of a local browser popup. Pass `-Organization` (your tenant's `.onmicrosoft.com`
+domain) to sign in against that specific tenant instead of the multi-tenant `organizations`
+endpoint.
+
+**Known limitation - `Get-ComplianceSecurityFilter` is always skipped under `-DeviceCode`**:
+the dedicated `-EnableSearchOnlySession` reconnect pass (see below) is wired by
+`Connect-IPPSSession` into a module-private script-scoped variable that only
+`Connect-IPPSSession` itself, running inside the ExchangeOnlineManagement module, can set -
+confirmed by reading `(Get-Command Connect-ExchangeOnline).Definition`, which reads that
+variable via `Test-Path Variable:Script:EnableSearchOnlySession` rather than accepting it as a
+parameter. Calling `Connect-ExchangeOnline` directly, as `-DeviceCode` does, cannot reach it.
+This pass is always skipped under `-DeviceCode`, equivalent to `-SkipComplianceSecurityFilter`,
+regardless of `-Command`. Use a different authentication method to include this cmdlet.
+
+**Superseded design note**: an earlier version of `-DeviceCode` acquired its own token via the
+third-party MSAL.PS module against a well-known public client ID, then passed it to
+`Connect-IPPSSession -AccessToken`. That failed against a live tenant with `UnAuthorized` -
+most likely because that client ID was never consented for the Security & Compliance
+PowerShell resource in that tenant. The current design avoids the whole class of problem by
+never acquiring a token itself.
+
+### Credential method
+
+`-Credential`: delegated sign-in, governed by the signed-in account's own role assignments.
+Requires the account to be exempt from MFA enforcement and from any Conditional Access policy
+blocking legacy/basic authentication, or the sign-in fails.
 
 ### Default (interactive) method
 
