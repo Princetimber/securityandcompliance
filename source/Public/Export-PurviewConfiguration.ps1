@@ -216,6 +216,23 @@ function Export-PurviewConfiguration
         warnings. See LEAST-PRIVILEGE.md's "True minimum for a narrow run" section.
         Source: "Roles and role groups in Microsoft Defender for Office 365 and Microsoft
         Purview" (https://learn.microsoft.com/microsoft-365/security/office-365-security/scc-permissions).
+        -DeviceCode and the Windows broker (WAM): on Windows, Connect-ExchangeOnline
+        authenticates through the WAM broker by default. A device-code sign-in never registers
+        an account with WAM, but Disconnect-ExchangeOnline's cleanup still asks the broker to
+        remove that (non-existent) account. The native MSALRuntime broker surfaces this as an
+        unmanaged AccountNotFound exception on a background thread, which is NOT a catchable
+        PowerShell error - it crashes the entire pwsh process (seen as "Unhandled exception
+        Microsoft.Identity.Client.NativeInterop.MsalRuntimeException: Status: AccountNotFound").
+        To avoid this, the -DeviceCode connect parameters include -DisableWAM when the installed
+        ExchangeOnlineManagement version exposes that parameter (present since the module added
+        WAM support; confirmed on 3.10.1). No try/catch can work around this crash because it
+        does not go through normal PowerShell error handling.
+        -Credential is given the same -DisableWAM treatment defensively: ROPC (username/
+        password) authentication is a non-interactive MSAL flow that likewise never registers an
+        account with the broker, and WAM defaults on for this parameter set too (confirmed in the
+        ExchangeOnlineManagement source, not method-specific). This has only been observed and
+        confirmed fixed live under -DeviceCode; the -Credential case is inferred from the module's
+        code, not reproduced.
 
         Author/Copyright:
             Architecture & Security - Advania
@@ -431,11 +448,33 @@ function Export-PurviewConfiguration
             # pre-consented first-party client, not a custom app registration or MSAL library.
             $deviceConnectParams = @{ ConnectionUri = 'https://ps.compliance.protection.outlook.com/PowerShell-LiveId'; Device = $true; ShowBanner = $false }
             if ($Organization) { $deviceConnectParams.AzureADAuthorizationEndpointUri = "https://login.microsoftonline.com/$Organization" }
+            # A device-code sign-in never registers an account with the Windows broker (WAM). On
+            # Windows, Disconnect-ExchangeOnline's cleanup still asks WAM to remove that
+            # non-existent account, and the native MSALRuntime broker surfaces this as an
+            # unmanaged AccountNotFound exception that crashes the whole pwsh process (not a
+            # catchable PowerShell error - see .NOTES). -DisableWAM keeps this connection off the
+            # broker entirely, avoiding the crash on disconnect. Only set it when the installed
+            # module exposes the parameter (added in ExchangeOnlineManagement 3.x).
+            if ((Get-Command -Name Connect-ExchangeOnline).Parameters.ContainsKey('DisableWAM'))
+            {
+                $deviceConnectParams.DisableWAM = $true
+            }
             $deviceConnectParams
         }
         'Credential'
         {
-            if ($Organization) { @{ Credential = $Credential; Organization = $Organization } } else { @{ Credential = $Credential } }
+            $credentialConnectParams = if ($Organization) { @{ Credential = $Credential; Organization = $Organization } } else { @{ Credential = $Credential } }
+            # Same WAM broker exposure as -DeviceCode (see that branch's comment and .NOTES):
+            # -Credential authenticates via ROPC, a non-interactive flow that never registers an
+            # account with the broker either, and WAM is on by default here too (DisableWAM
+            # defaults to $false in Connect-IPPSSession/Connect-ExchangeOnline regardless of
+            # parameter set). Unverified against a live tenant, since this bug was only observed
+            # and confirmed fixed under -DeviceCode - applied defensively on the same reasoning.
+            if ((Get-Command -Name Connect-IPPSSession).Parameters.ContainsKey('DisableWAM'))
+            {
+                $credentialConnectParams.DisableWAM = $true
+            }
+            $credentialConnectParams
         }
         default
         {

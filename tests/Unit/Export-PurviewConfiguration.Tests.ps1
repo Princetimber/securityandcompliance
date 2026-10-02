@@ -27,7 +27,9 @@ BeforeAll {
             [Parameter()]
             [string]$AccessToken,
             [Parameter()]
-            [pscredential]$Credential
+            [pscredential]$Credential,
+            [Parameter()]
+            [switch]$DisableWAM
         )
     }
 
@@ -58,7 +60,9 @@ BeforeAll {
             [Parameter()]
             [switch]$Device,
             [Parameter()]
-            [switch]$ShowBanner
+            [switch]$ShowBanner,
+            [Parameter()]
+            [switch]$DisableWAM
         )
     }
 
@@ -339,6 +343,28 @@ Describe 'Export-PurviewConfiguration' {
             Should -Invoke Connect-IPPSSession -Times 0
         }
 
+        It 'passes -DisableWAM under -DeviceCode to avoid the WAM broker AccountNotFound crash on disconnect' {
+            $null = Export-PurviewConfiguration -OutputPath $TestDrive -DeviceCode -Command 'Get-Label' -SkipModuleCheck -SkipComplianceSecurityFilter -Confirm:$false
+
+            Should -Invoke Connect-ExchangeOnline -Times 1 -ParameterFilter {
+                $Device -eq $true -and $DisableWAM -eq $true
+            }
+        }
+
+        It 'does not set -DisableWAM under -DeviceCode when the installed module does not expose it' {
+            Mock Get-Command -ParameterFilter { $Name -eq 'Connect-ExchangeOnline' } -MockWith {
+                [pscustomobject]@{
+                    Parameters = [System.Collections.Generic.Dictionary[string, object]]::new()
+                }
+            }
+
+            $null = Export-PurviewConfiguration -OutputPath $TestDrive -DeviceCode -Command 'Get-Label' -SkipModuleCheck -SkipComplianceSecurityFilter -Confirm:$false
+
+            Should -Invoke Connect-ExchangeOnline -Times 1 -ParameterFilter {
+                $Device -eq $true -and -not $DisableWAM
+            }
+        }
+
         It 'passes -Organization through to target a specific tenant''s authorization endpoint' {
             $null = Export-PurviewConfiguration -OutputPath $TestDrive -DeviceCode -Organization 'contoso.onmicrosoft.com' -Command 'Get-Label' -SkipModuleCheck -SkipComplianceSecurityFilter -Confirm:$false
 
@@ -374,6 +400,30 @@ Describe 'Export-PurviewConfiguration' {
 
             Should -Invoke Connect-IPPSSession -Times 1 -ParameterFilter {
                 $Credential -eq $cred -and -not $Organization
+            }
+        }
+
+        It 'passes -DisableWAM under -Credential to avoid the same WAM broker AccountNotFound crash on disconnect' {
+            $cred = [pscredential]::new('admin@contoso.onmicrosoft.com', (ConvertTo-SecureString 'P@ssw0rd!' -AsPlainText -Force))
+            $null = Export-PurviewConfiguration -OutputPath $TestDrive -Credential $cred -Command 'Get-Label' -SkipModuleCheck -SkipComplianceSecurityFilter -Confirm:$false
+
+            Should -Invoke Connect-IPPSSession -Times 1 -ParameterFilter {
+                $Credential -eq $cred -and $DisableWAM -eq $true
+            }
+        }
+
+        It 'does not set -DisableWAM under -Credential when the installed module does not expose it' {
+            Mock Get-Command -ParameterFilter { $Name -eq 'Connect-IPPSSession' } -MockWith {
+                [pscustomobject]@{
+                    Parameters = [System.Collections.Generic.Dictionary[string, object]]::new()
+                }
+            }
+            $cred = [pscredential]::new('admin@contoso.onmicrosoft.com', (ConvertTo-SecureString 'P@ssw0rd!' -AsPlainText -Force))
+
+            $null = Export-PurviewConfiguration -OutputPath $TestDrive -Credential $cred -Command 'Get-Label' -SkipModuleCheck -SkipComplianceSecurityFilter -Confirm:$false
+
+            Should -Invoke Connect-IPPSSession -Times 1 -ParameterFilter {
+                $Credential -eq $cred -and -not $DisableWAM
             }
         }
     }
