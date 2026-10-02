@@ -58,9 +58,7 @@ BeforeAll {
             [Parameter()]
             [switch]$Device,
             [Parameter()]
-            [switch]$ShowBanner,
-            [Parameter()]
-            [switch]$DisableWAM
+            [switch]$ShowBanner
         )
     }
 
@@ -339,28 +337,6 @@ Describe 'Export-PurviewConfiguration' {
                 $Device -eq $true -and $ConnectionUri -eq 'https://ps.compliance.protection.outlook.com/PowerShell-LiveId' -and -not $AzureADAuthorizationEndpointUri
             }
             Should -Invoke Connect-IPPSSession -Times 0
-        }
-
-        It 'passes -DisableWAM under -DeviceCode to avoid the WAM broker AccountNotFound crash on disconnect' {
-            $null = Export-PurviewConfiguration -OutputPath $TestDrive -DeviceCode -Command 'Get-Label' -SkipModuleCheck -SkipComplianceSecurityFilter -Confirm:$false
-
-            Should -Invoke Connect-ExchangeOnline -Times 1 -ParameterFilter {
-                $Device -eq $true -and $DisableWAM -eq $true
-            }
-        }
-
-        It 'does not set -DisableWAM under -DeviceCode when the installed module does not expose it' {
-            Mock Get-Command -ParameterFilter { $Name -eq 'Connect-ExchangeOnline' } -MockWith {
-                [pscustomobject]@{
-                    Parameters = [System.Collections.Generic.Dictionary[string, object]]::new()
-                }
-            }
-
-            $null = Export-PurviewConfiguration -OutputPath $TestDrive -DeviceCode -Command 'Get-Label' -SkipModuleCheck -SkipComplianceSecurityFilter -Confirm:$false
-
-            Should -Invoke Connect-ExchangeOnline -Times 1 -ParameterFilter {
-                $Device -eq $true -and -not $DisableWAM
-            }
         }
 
         It 'passes -Organization through to target a specific tenant''s authorization endpoint' {
