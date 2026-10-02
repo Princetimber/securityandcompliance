@@ -227,12 +227,6 @@ function Export-PurviewConfiguration
         ExchangeOnlineManagement version exposes that parameter (present since the module added
         WAM support; confirmed on 3.10.1). No try/catch can work around this crash because it
         does not go through normal PowerShell error handling.
-        -Credential is given the same -DisableWAM treatment defensively: ROPC (username/
-        password) authentication is a non-interactive MSAL flow that likewise never registers an
-        account with the broker, and WAM defaults on for this parameter set too (confirmed in the
-        ExchangeOnlineManagement source, not method-specific). This has only been observed and
-        confirmed fixed live under -DeviceCode; the -Credential case is inferred from the module's
-        code, not reproduced.
 
         Author/Copyright:
             Architecture & Security - Advania
@@ -463,18 +457,7 @@ function Export-PurviewConfiguration
         }
         'Credential'
         {
-            $credentialConnectParams = if ($Organization) { @{ Credential = $Credential; Organization = $Organization } } else { @{ Credential = $Credential } }
-            # Same WAM broker exposure as -DeviceCode (see that branch's comment and .NOTES):
-            # -Credential authenticates via ROPC, a non-interactive flow that never registers an
-            # account with the broker either, and WAM is on by default here too (DisableWAM
-            # defaults to $false in Connect-IPPSSession/Connect-ExchangeOnline regardless of
-            # parameter set). Unverified against a live tenant, since this bug was only observed
-            # and confirmed fixed under -DeviceCode - applied defensively on the same reasoning.
-            if ((Get-Command -Name Connect-IPPSSession).Parameters.ContainsKey('DisableWAM'))
-            {
-                $credentialConnectParams.DisableWAM = $true
-            }
-            $credentialConnectParams
+            if ($Organization) { @{ Credential = $Credential; Organization = $Organization } } else { @{ Credential = $Credential } }
         }
         default
         {
