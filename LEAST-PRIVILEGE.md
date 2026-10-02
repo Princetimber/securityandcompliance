@@ -88,11 +88,28 @@ most likely because that client ID was never consented for the Security & Compli
 PowerShell resource in that tenant. The current design avoids the whole class of problem by
 never acquiring a token itself.
 
+**Fixed - WAM broker crash on disconnect (Windows only)**: on Windows, `Connect-ExchangeOnline`
+has authenticated through the native WAM (Web Account Manager) broker by default since
+ExchangeOnlineManagement 3.7. A device-code sign-in never registers an account with WAM, but
+`Disconnect-ExchangeOnline`'s cleanup still asked the broker to remove that non-existent
+account. The native MSALRuntime broker surfaced this as an unmanaged
+`MsalRuntimeException: AccountNotFound` on a background thread - not a catchable PowerShell
+error, so it crashed the entire `pwsh` process. Fixed by passing `-DisableWAM` on the
+`-DeviceCode` connect path (only when the installed module exposes the parameter), confirmed
+live on Windows. See `Export-PurviewConfiguration.ps1`'s `.NOTES` for the full write-up.
+
 ### Credential method
 
 `-Credential`: delegated sign-in, governed by the signed-in account's own role assignments.
 Requires the account to be exempt from MFA enforcement and from any Conditional Access policy
 blocking legacy/basic authentication, or the sign-in fails.
+
+**Same WAM broker crash risk (Windows only), fixed defensively**: `-Credential` authenticates
+via ROPC (username/password), a non-interactive MSAL flow that likewise never registers an
+account with the WAM broker, and WAM is on by default for this parameter set too - not
+method-specific. `-DisableWAM` is applied here on the same reasoning as `-DeviceCode` above.
+Unlike the `-DeviceCode` case, this has not been reproduced or confirmed live; it's inferred
+from the ExchangeOnlineManagement module's own source.
 
 ### Default (interactive) method
 
