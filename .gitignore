@@ -2,3 +2,5 @@
 graphify-out/
 coverage.xml
 testResults.xml
+.claude/
+.serena/
