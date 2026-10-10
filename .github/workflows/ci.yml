@@ -1,0 +1,104 @@
+name: CI
+
+# Lints with PSScriptAnalyzer and runs the Pester v6 suite on every push to main and every pull
+# request. The module is a flat dot-source layout, so there is nothing to build or publish.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # Minimum percentage of source/ commands the tests must execute. The suite sits near 94%.
+  COVERAGE_THRESHOLD: 80
+
+jobs:
+  test:
+    name: Lint and test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      # The tests carry Windows and non-Windows guards ($IsWindows), so run on all three.
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v7
+
+      - name: Install Pester and PSScriptAnalyzer
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Set-PSRepository -Name PSGallery -InstallationPolicy Trusted
+          Install-Module -Name Pester -MinimumVersion 6.0.0 -MaximumVersion 6.99.99 -Scope CurrentUser -Force -SkipPublisherCheck
+          Install-Module -Name PSScriptAnalyzer -MinimumVersion 1.25.0 -MaximumVersion 1.99.99 -Scope CurrentUser -Force
+          'Pester {0}, PSScriptAnalyzer {1}, PowerShell {2}' -f (
+              (Get-Module -Name Pester -ListAvailable | Sort-Object -Property Version -Descending | Select-Object -First 1).Version),
+              (Get-Module -Name PSScriptAnalyzer -ListAvailable | Sort-Object -Property Version -Descending | Select-Object -First 1).Version,
+              $PSVersionTable.PSVersion
+
+      - name: Lint with PSScriptAnalyzer
+        # Findings do not depend on the OS, so lint once.
+        if: matrix.os == 'ubuntu-latest'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Import-Module -Name PSScriptAnalyzer
+          $findings = @(Invoke-ScriptAnalyzer -Path . -Recurse -Severity Error, Warning -Settings ./PSScriptAnalyzerSettings.psd1)
+          if ($findings.Count -gt 0)
+          {
+              $findings | Format-Table -Property RuleName, Severity, @{ Name = 'File'; Expression = { Split-Path -Path $_.ScriptPath -Leaf } }, Line, Message -AutoSize -Wrap | Out-String -Width 200 | Write-Host
+              throw "PSScriptAnalyzer reported $($findings.Count) finding(s) at Error or Warning severity."
+          }
+          'PSScriptAnalyzer: no findings.'
+
+      - name: Run Pester tests with coverage
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Import-Module -Name Pester -MinimumVersion 6.0.0
+          $configuration = New-PesterConfiguration
+          $configuration.Run.Path = './tests'
+          $configuration.Run.PassThru = $true
+          $configuration.Run.Exit = $false
+          $configuration.Output.Verbosity = 'Normal'
+          $configuration.CodeCoverage.Enabled = $true
+          $configuration.CodeCoverage.Path = './source'
+          $configuration.CodeCoverage.OutputPath = Join-Path -Path $env:RUNNER_TEMP -ChildPath 'coverage.xml'
+          $result = Invoke-Pester -Configuration $configuration
+
+          # Pester reports a missed coverage target without failing the run, and a discovery
+          # error can leave zero tests executed, so check each condition explicitly.
+          if ([string]::IsNullOrWhiteSpace($env:COVERAGE_THRESHOLD)) { throw 'COVERAGE_THRESHOLD is not set.' }
+          $coverage = [math]::Round($result.CodeCoverage.CoveragePercent, 1)
+          $threshold = [double]$env:COVERAGE_THRESHOLD
+          $summary = @(
+              "### Tests on ${{ matrix.os }}"
+              ''
+              "- Passed: $($result.PassedCount)"
+              "- Failed: $($result.FailedCount)"
+              "- Skipped: $($result.SkippedCount)"
+              "- Coverage of source/: $coverage% (minimum $threshold%)"
+          )
+          $summary | Add-Content -Path $env:GITHUB_STEP_SUMMARY -Encoding utf8NoBOM
+
+          $problems = [System.Collections.Generic.List[string]]::new()
+          if ($result.PassedCount -eq 0) { $problems.Add('No tests passed; discovery may have failed.') }
+          if ($result.FailedCount -gt 0 -or $result.FailedBlocksCount -gt 0 -or $result.FailedContainersCount -gt 0)
+          {
+              $problems.Add("Failures: $($result.FailedCount) test(s), $($result.FailedBlocksCount) block(s), $($result.FailedContainersCount) container(s).")
+          }
+          if ($coverage -lt $threshold) { $problems.Add("Coverage $coverage% is below the $threshold% minimum.") }
+          if ($problems.Count -gt 0)
+          {
+              $problems | ForEach-Object -Process { Write-Host "::error::$_" }
+              exit 1
+          }
