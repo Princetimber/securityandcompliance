@@ -6,6 +6,9 @@
 . "$PSScriptRoot/../Private/Confirm-ExportOutputPath.ps1"
 . "$PSScriptRoot/../Private/Invoke-ExportCommand.ps1"
 . "$PSScriptRoot/../Private/Get-NewConnectionInformation.ps1"
+. "$PSScriptRoot/../Private/Get-ExportCommandList.ps1"
+. "$PSScriptRoot/../Private/Get-PurviewConnectParameter.ps1"
+. "$PSScriptRoot/../Private/Invoke-ComplianceSecurityFilterPass.ps1"
 
 function Export-PurviewConfiguration
 {
@@ -285,84 +288,10 @@ function Export-PurviewConfiguration
     )
     # Validated before anything connects or installs: a typo'd -Command value should never cost
     # a real sign-in (interactive or app-only) before failing.
-    # Cmdlets that take no mandatory parameters and can be enumerated blind.
-    # See .NOTES for cmdlets intentionally excluded because they require a per-object Identity.
-    $defaultCommands = @(
-        'Get-Labelpolicy'
-        'Get-LabelpolicyRule'
-        'Get-DlpCompliancePolicy'
-        'Get-DlpComplianceRule'
-        'Get-DlpDetectionsReport'
-        'Get-DlpEdmSchema'
-        'Get-DlpKeywordDictionary'
-        'Get-DlpSensitiveInformationType'
-        'Get-DlpSensitiveInformationTypeConfig'
-        'Get-DlpSensitiveInformationTypeRulePackage'
-        'Get-DlpSiDetectionsReport'
-        'Get-RetentionCompliancePolicy'
-        'Get-RetentionComplianceRule'
-        'Get-AdaptiveScope'
-        'Get-AuditConfig'
-        'Get-AuditConfigurationPolicy'
-        'Get-AuditConfigurationRule'
-        'Get-DeviceComplianceDetailsReport'
-        'Get-DeviceComplianceDetailsReportFilter'
-        'Get-DeviceCompliancePolicyInventory'
-        'Get-DeviceComplianceReportDate'
-        'Get-DeviceComplianceSummaryReport'
-        'Get-DeviceComplianceUserInventory'
-        'Get-DeviceConditionalAccessPolicy'
-        'Get-DeviceConditionalAccessRule'
-        'Get-DeviceConfigurationPolicy'
-        'Get-DeviceConfigurationRule'
-        'Get-DevicePolicy'
-        'Get-DeviceTenantPolicy'
-        'Get-DeviceTenantRule'
-        'Get-FilePlanPropertyAuthority'
-        'Get-FilePlanPropertyCategory'
-        'Get-FilePlanPropertyCitation'
-        'Get-FilePlanPropertyDepartment'
-        'Get-FilePlanPropertyReferenceId'
-        'Get-FilePlanPropertyStructure'
-        'Get-FilePlanPropertySubCategory'
-        'Get-ComplianceCase'
-        'Get-ComplianceCaseStatistics'
-        'Get-ComplianceRetentionEvent'
-        'Get-ComplianceRetentionEventType'
-        'Get-ComplianceSearch'
-        'Get-ComplianceSearchAction'
-        'Get-ComplianceTag'
-        'Get-ComplianceTagStorage'
-        'Get-HoldCompliancePolicy'
-        'Get-HoldComplianceRule'
-        'Get-CaseHoldRule'
-        'Get-eDiscoveryCaseAdmin'
-        'Get-SupervisoryReviewOverallProgressReport'
-        'Get-SupervisoryReviewPolicyReport'
-        'Get-SupervisoryReviewPolicyV2'
-        'Get-SupervisoryReviewReport'
-        'Get-SupervisoryReviewRule'
-        'Get-SupervisoryReviewTopCasesReport'
-        'Get-InsiderRiskPolicy'
-        'Get-InformationBarrierPolicy'
-        'Get-InformationBarrierPoliciesApplicationStatus'
-        'Get-QuarantineMessage'
-        'Get-ActivityAlert'
-        'Get-AdminAuditLogConfig'
-        'Get-AutoSensitivityLabelPolicy'
-        'Get-AutoSensitivityLabelRule'
-        'Get-DataRetentionReport'
-        'Get-MailFilterListReport'
-        'Get-ManagementRole'
-        'Get-OrganizationSegment'
-        'Get-PolicyConfig'
-        'Get-ProtectionAlert'
-        'Get-RegulatoryComplianceUI'
-        'Get-RoleGroup'
-        'Get-SCInsights'
-        'Get-SecurityPrincipal'
-        'Get-UnifiedAuditLogRetentionPolicy'
-    )
+    # Cmdlets that take no mandatory parameters and can be enumerated blind. See
+    # Get-ExportCommandList, and .NOTES for cmdlets intentionally excluded because they
+    # require a per-object Identity.
+    $defaultCommands = Get-ExportCommandList
     # Get-Label and Get-ComplianceSecurityFilter are not part of $defaultCommands (Get-Label
     # needs -IncludeDetailedLabelActions, handled via $commandSpecs below; Get-ComplianceSecurityFilter
     # needs its own session, handled in the dedicated pass at the end), but are valid -Command values.
@@ -405,82 +334,7 @@ function Export-PurviewConfiguration
     # Built once, reused unmodified for both the standard session below and the
     # -EnableSearchOnlySession reconnect later, so an app-only run never drops into an
     # interactive prompt partway through for the Get-ComplianceSecurityFilter pass.
-    $connectParams = switch ($PSCmdlet.ParameterSetName)
-    {
-        'CertificateThumbprint'
-        {
-            if (-not $IsWindows)
-            {
-                Write-Error -Message 'The -CertificateThumbprint parameter set requires the Windows certificate store (the Cert: provider) and is not supported on this platform. Use -CertificateFilePath instead.' -Category InvalidOperation -ErrorAction Stop
-            }
-            @{ CertificateThumbprint = $CertificateThumbprint; AppId = $AppId; Organization = $Organization }
-        }
-        'CertificateFilePath'
-        {
-            try
-            {
-                $certificate = [System.Security.Cryptography.X509Certificates.X509Certificate2]::new($CertificateFilePath, $CertificatePassword)
-            }
-            catch
-            {
-                Write-Error -Message "Failed to load certificate from '$CertificateFilePath': $($_.Exception.Message)" -Category SecurityError -ErrorAction Stop
-            }
-            if ($certificate.NotAfter -lt (Get-Date))
-            {
-                Write-Error -Message "Certificate '$CertificateFilePath' expired on $($certificate.NotAfter)." -Category SecurityError -ErrorAction Stop
-            }
-            elseif ($certificate.NotAfter -lt (Get-Date).AddDays(30))
-            {
-                Write-Warning "Certificate '$CertificateFilePath' expires on $($certificate.NotAfter) - within 30 days."
-            }
-            @{ CertificateFilePath = $CertificateFilePath; CertificatePassword = $CertificatePassword; AppId = $AppId; Organization = $Organization }
-        }
-        'AccessToken'
-        {
-            @{ AccessToken = $AccessToken; Organization = $Organization }
-        }
-        'DeviceCode'
-        {
-            # Connect-IPPSSession is itself a thin wrapper around Connect-ExchangeOnline with
-            # this exact -ConnectionUri, but only exposes -Device (native device-code sign-in)
-            # inside Azure Cloud Shell. Calling Connect-ExchangeOnline directly, with the same
-            # -ConnectionUri, reaches that same native path everywhere else - Microsoft's own
-            # pre-consented first-party client, not a custom app registration or MSAL library.
-            $deviceConnectParams = @{ ConnectionUri = 'https://ps.compliance.protection.outlook.com/PowerShell-LiveId'; Device = $true; ShowBanner = $false }
-            if ($Organization) { $deviceConnectParams.AzureADAuthorizationEndpointUri = "https://login.microsoftonline.com/$Organization" }
-            # A device-code sign-in never registers an account with the Windows broker (WAM). On
-            # Windows, Disconnect-ExchangeOnline's cleanup still asks WAM to remove that
-            # non-existent account, and the native MSALRuntime broker surfaces this as an
-            # unmanaged AccountNotFound exception that crashes the whole pwsh process (not a
-            # catchable PowerShell error - see .NOTES). -DisableWAM keeps this connection off the
-            # broker entirely, avoiding the crash on disconnect. Only set it when the installed
-            # module exposes the parameter (added in ExchangeOnlineManagement 3.x).
-            if ((Get-Command -Name Connect-ExchangeOnline).Parameters.ContainsKey('DisableWAM'))
-            {
-                $deviceConnectParams.DisableWAM = $true
-            }
-            $deviceConnectParams
-        }
-        'Credential'
-        {
-            $credentialConnectParams = if ($Organization) { @{ Credential = $Credential; Organization = $Organization } } else { @{ Credential = $Credential } }
-            # Same WAM broker exposure as -DeviceCode (see that branch's comment and .NOTES):
-            # -Credential authenticates via ROPC, a non-interactive flow that never registers an
-            # account with the broker either, and WAM is on by default here too (DisableWAM
-            # defaults to $false in Connect-IPPSSession/Connect-ExchangeOnline regardless of
-            # parameter set). Unverified against a live tenant, since this bug was only observed
-            # and confirmed fixed under -DeviceCode - applied defensively on the same reasoning.
-            if ((Get-Command -Name Connect-IPPSSession).Parameters.ContainsKey('DisableWAM'))
-            {
-                $credentialConnectParams.DisableWAM = $true
-            }
-            $credentialConnectParams
-        }
-        default
-        {
-            if ($UserPrincipalName) { @{ UserPrincipalName = $UserPrincipalName } } else { @{} }
-        }
-    }
+    $connectParams = Get-PurviewConnectParameter -ParameterSetName $PSCmdlet.ParameterSetName -BoundParameter $PSBoundParameters
     try
     {
         Write-Verbose "Connecting to Security & Compliance PowerShell (method: $($PSCmdlet.ParameterSetName))"
@@ -532,91 +386,7 @@ function Export-PurviewConfiguration
         # fails (e.g. account lacks eDiscovery Administrator).
         if ((-not $Command -or $Command -contains 'Get-ComplianceSecurityFilter') -and -not $SkipComplianceSecurityFilter)
         {
-            if ($PSCmdlet.ParameterSetName -eq 'DeviceCode')
-            {
-                # -EnableSearchOnlySession is wired by Connect-IPPSSession into a module-private
-                # script-scoped variable that only Connect-IPPSSession itself (running inside
-                # ExchangeOnlineManagement) can set - calling Connect-ExchangeOnline directly, as
-                # -DeviceCode does, cannot reach it. No known way to run this pass under
-                # -DeviceCode; always skipped, same as -SkipComplianceSecurityFilter.
-                Write-Warning 'Get-ComplianceSecurityFilter requires a dedicated -EnableSearchOnlySession reconnect, which is not reachable through -DeviceCode (see .NOTES). Skipping. Use a different authentication method to include this cmdlet, or pass -SkipComplianceSecurityFilter to silence this warning.'
-                [pscustomobject]@{
-                    Command     = 'Get-ComplianceSecurityFilter'
-                    RecordCount = 0
-                    Exported    = $false
-                }
-            }
-            else
-            {
-                $searchSessionModule = Get-Module -Name ExchangeOnlineManagement | Sort-Object -Property Version -Descending | Select-Object -First 1
-                if ($searchSessionModule -and $searchSessionModule.Version -lt [version]'3.9.0')
-                {
-                    Write-Warning "Get-ComplianceSecurityFilter requires ExchangeOnlineManagement v3.9.0 or later (loaded: $($searchSessionModule.Version)). Skipping. Update the module, then re-run with -Command 'Get-ComplianceSecurityFilter' to retry just this cmdlet."
-                    [pscustomobject]@{
-                        Command     = 'Get-ComplianceSecurityFilter'
-                        RecordCount = 0
-                        Exported    = $false
-                    }
-                }
-                else
-                {
-                    $searchConnectionId = $null
-                    try
-                    {
-                        Write-Verbose 'Reconnecting with -EnableSearchOnlySession for Get-ComplianceSecurityFilter, reusing the same authentication method'
-                        if ($standardConnectionId)
-                        {
-                            # Disconnect only the standard session this function itself opened -
-                            # never a blind Disconnect-ExchangeOnline, which would also tear down
-                            # any other Exchange Online/IPPS session the caller has open.
-                            Disconnect-ExchangeOnline -ConnectionId $standardConnectionId -Confirm:$false -ErrorAction SilentlyContinue
-                            # Cleared so the outer finally below doesn't attempt a second disconnect
-                            # of a session already gone.
-                            $standardConnectionId = $null
-                        }
-                        $priorConnectionIds = @(Get-ConnectionInformation -ErrorAction SilentlyContinue | Select-Object -ExpandProperty ConnectionId)
-                        Connect-IPPSSession @connectParams -EnableSearchOnlySession -ErrorAction Stop
-                        $searchConnectionId = (Get-NewConnectionInformation -PriorConnectionIds $priorConnectionIds).ConnectionId
-                        $data = Get-ComplianceSecurityFilter -ErrorAction Stop
-                        if ($data)
-                        {
-                            Write-Verbose 'Exporting data generated by Get-ComplianceSecurityFilter'
-                            $wasExported = Export-ComplianceDataFile -CmdletName 'Get-ComplianceSecurityFilter' -Data $data -Destination $OutputPath
-                            [pscustomobject]@{
-                                Command     = 'Get-ComplianceSecurityFilter'
-                                RecordCount = @($data).Count
-                                Exported    = $wasExported
-                            }
-                        }
-                        else
-                        {
-                            Write-Warning 'No data generated by Get-ComplianceSecurityFilter'
-                            [pscustomobject]@{
-                                Command     = 'Get-ComplianceSecurityFilter'
-                                RecordCount = 0
-                                Exported    = $false
-                            }
-                        }
-                    }
-                    catch
-                    {
-                        Write-Error -Message "Get-ComplianceSecurityFilter failed: $($_.Exception.Message). Requires the eDiscovery Administrator role (see .NOTES) in addition to Compliance/Security Administrator."
-                        [pscustomobject]@{
-                            Command     = 'Get-ComplianceSecurityFilter'
-                            RecordCount = 0
-                            Exported    = $false
-                        }
-                    }
-                    finally
-                    {
-                        # Leave no search-only session connected behind on return, success or not.
-                        if ($searchConnectionId)
-                        {
-                            Disconnect-ExchangeOnline -ConnectionId $searchConnectionId -Confirm:$false -ErrorAction SilentlyContinue
-                        }
-                    }
-                }
-            }
+            Invoke-ComplianceSecurityFilterPass -ConnectParameter $connectParams -OutputPath $OutputPath -ParameterSetName $PSCmdlet.ParameterSetName -StandardConnectionId ([ref]$standardConnectionId)
         }
     }
     finally
