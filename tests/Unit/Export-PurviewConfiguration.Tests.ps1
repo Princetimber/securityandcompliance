@@ -51,6 +51,7 @@ BeforeAll {
     function Disconnect-ExchangeOnline
     {
         [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSReviewUnusedParameter', '', Justification = 'Stub signature only, mocked in tests below')]
+        [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSShouldProcess', '', Justification = 'Stub signature only: SupportsShouldProcess is what supplies the -Confirm parameter callers pass; mocked in tests below')]
         # SupportsShouldProcess automatically supplies the -Confirm common parameter; no
         # manual [switch]$Confirm is declared here.
         [CmdletBinding(SupportsShouldProcess)]
