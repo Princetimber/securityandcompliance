@@ -128,7 +128,10 @@ function New-PurviewConfigurationReport
         $rows = [System.Collections.Generic.List[string]]::new()
         foreach ($name in $Property)
         {
-            $rows.Add("<tr><td>$(ConvertTo-SafeHtml $name)</td><td>$(ConvertTo-SafeHtml $Item.$name)</td></tr>")
+            # Exported objects omit properties that were never populated; under Set-StrictMode
+            # reading one directly throws, so render an absent property as an empty cell.
+            $value = if ($Item.PSObject.Properties[$name]) { $Item.$name }
+            $rows.Add("<tr><td>$(ConvertTo-SafeHtml $name)</td><td>$(ConvertTo-SafeHtml $value)</td></tr>")
         }
         return ($rows -join '')
     }
@@ -485,7 +488,7 @@ function New-PurviewConfigurationReport
         $htmlReportPath = Join-Path -Path $SourcePath -ChildPath $HTMLReport
         if ($PSCmdlet.ShouldProcess($htmlReportPath, 'Write HTML report'))
         {
-            ($output -join '') | Out-File -FilePath $htmlReportPath
+            ($output -join '') | Out-File -FilePath $htmlReportPath -Encoding utf8NoBOM
             Write-Verbose "Report written to $htmlReportPath"
         }
     }

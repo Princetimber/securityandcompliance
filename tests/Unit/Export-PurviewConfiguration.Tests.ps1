@@ -2,6 +2,21 @@
 #Requires -Modules @{ ModuleName = 'Pester'; ModuleVersion = '6.0.0' }
 
 BeforeAll {
+    # Run the code under test in strict mode so an unguarded missing property fails here, not in an
+    # operator's session that happens to enable it.
+    Set-StrictMode -Version Latest
+
+    function Get-TestCredential
+    {
+        # Fixture credential built character by character so no plaintext-to-SecureString
+        # conversion is needed. The value is a placeholder; it never reaches a real service.
+        $secret = [System.Security.SecureString]::new()
+        foreach ($character in 'P@ssw0rd!'.ToCharArray())
+        {
+            $secret.AppendChar($character)
+        }
+        [pscredential]::new('admin@contoso.onmicrosoft.com', $secret)
+    }
     # Stubs for Security & Compliance PowerShell cmdlets (ExchangeOnlineManagement module) that
     # are not installed in this environment. Declared before dot-sourcing so Mock has a real
     # command to attach to, with a signature matching every parameter the code under test binds.
@@ -386,7 +401,7 @@ Describe 'Export-PurviewConfiguration' {
         }
 
         It 'passes -Credential through, with -Organization when supplied' {
-            $cred = [pscredential]::new('admin@contoso.onmicrosoft.com', (ConvertTo-SecureString 'P@ssw0rd!' -AsPlainText -Force))
+            $cred = Get-TestCredential
             $null = Export-PurviewConfiguration -OutputPath $TestDrive -Credential $cred -Organization 'contoso.onmicrosoft.com' -Command 'Get-Label' -SkipModuleCheck -SkipComplianceSecurityFilter -Confirm:$false
 
             Should -Invoke Connect-IPPSSession -Times 1 -ParameterFilter {
@@ -395,7 +410,7 @@ Describe 'Export-PurviewConfiguration' {
         }
 
         It 'passes -Credential through with no -Organization when not supplied' {
-            $cred = [pscredential]::new('admin@contoso.onmicrosoft.com', (ConvertTo-SecureString 'P@ssw0rd!' -AsPlainText -Force))
+            $cred = Get-TestCredential
             $null = Export-PurviewConfiguration -OutputPath $TestDrive -Credential $cred -Command 'Get-Label' -SkipModuleCheck -SkipComplianceSecurityFilter -Confirm:$false
 
             Should -Invoke Connect-IPPSSession -Times 1 -ParameterFilter {
@@ -404,7 +419,7 @@ Describe 'Export-PurviewConfiguration' {
         }
 
         It 'passes -DisableWAM under -Credential to avoid the same WAM broker AccountNotFound crash on disconnect' {
-            $cred = [pscredential]::new('admin@contoso.onmicrosoft.com', (ConvertTo-SecureString 'P@ssw0rd!' -AsPlainText -Force))
+            $cred = Get-TestCredential
             $null = Export-PurviewConfiguration -OutputPath $TestDrive -Credential $cred -Command 'Get-Label' -SkipModuleCheck -SkipComplianceSecurityFilter -Confirm:$false
 
             Should -Invoke Connect-IPPSSession -Times 1 -ParameterFilter {
@@ -418,7 +433,7 @@ Describe 'Export-PurviewConfiguration' {
                     Parameters = [System.Collections.Generic.Dictionary[string, object]]::new()
                 }
             }
-            $cred = [pscredential]::new('admin@contoso.onmicrosoft.com', (ConvertTo-SecureString 'P@ssw0rd!' -AsPlainText -Force))
+            $cred = Get-TestCredential
 
             $null = Export-PurviewConfiguration -OutputPath $TestDrive -Credential $cred -Command 'Get-Label' -SkipModuleCheck -SkipComplianceSecurityFilter -Confirm:$false
 

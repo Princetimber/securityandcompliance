@@ -12,6 +12,9 @@
 # Pester's own $TestDrive sandbox so the actual on-disk behaviour is what's under test.
 
 BeforeAll {
+    # Run the code under test in strict mode so an unguarded missing property fails here, not in an
+    # operator's session that happens to enable it.
+    Set-StrictMode -Version Latest
     function Connect-IPPSSession
     {
         [CmdletBinding()]
