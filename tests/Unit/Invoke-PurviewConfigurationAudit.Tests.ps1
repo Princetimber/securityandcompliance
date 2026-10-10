@@ -2,6 +2,21 @@
 #Requires -Modules @{ ModuleName = 'Pester'; ModuleVersion = '6.0.0' }
 
 BeforeAll {
+    # Run the code under test in strict mode so an unguarded missing property fails here, not in an
+    # operator's session that happens to enable it.
+    Set-StrictMode -Version Latest
+
+    function Get-TestCredential
+    {
+        # Fixture credential built character by character so no plaintext-to-SecureString
+        # conversion is needed. The value is a placeholder; it never reaches a real service.
+        $secret = [System.Security.SecureString]::new()
+        foreach ($character in 'P@ssw0rd!'.ToCharArray())
+        {
+            $secret.AppendChar($character)
+        }
+        [pscredential]::new('admin@contoso.onmicrosoft.com', $secret)
+    }
     # Invoke-PurviewConfigurationAudit.ps1 dot-sources both real function files itself;
     # mock the two stage functions afterwards rather than stubbing their dependencies.
     . "$PSScriptRoot/../../source/Public/Invoke-PurviewConfigurationAudit.ps1"
@@ -66,7 +81,7 @@ Describe 'Invoke-PurviewConfigurationAudit' {
         }
 
         It 'passes -Credential through to Export-PurviewConfiguration' {
-            $cred = [pscredential]::new('admin@contoso.onmicrosoft.com', (ConvertTo-SecureString 'P@ssw0rd!' -AsPlainText -Force))
+            $cred = Get-TestCredential
             Invoke-PurviewConfigurationAudit -OutputPath $TestDrive -Credential $cred -Confirm:$false
 
             Should -Invoke Export-PurviewConfiguration -Times 1 -ParameterFilter {

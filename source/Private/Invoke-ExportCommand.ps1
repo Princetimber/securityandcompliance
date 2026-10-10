@@ -17,13 +17,15 @@ function Invoke-ExportCommand
 
     try
     {
-        $data = if ($Spec.Paged)
+        # Index the hashtable rather than using dot access: under Set-StrictMode a missing key
+        # read through dot access throws, and most specs carry no Paged key.
+        $data = if ($Spec['Paged'])
         {
-            Get-PagedReportData -CmdletName $CmdletName -PageSize $Spec.PageSize -AdditionalParameters $Spec.AdditionalParameters
+            Get-PagedReportData -CmdletName $CmdletName -PageSize $Spec['PageSize'] -AdditionalParameters $Spec['AdditionalParameters']
         }
         else
         {
-            $additionalParams = $Spec.AdditionalParameters
+            $additionalParams = $Spec['AdditionalParameters']
             @(& $CmdletName @additionalParams -ErrorAction Stop)
         }
 

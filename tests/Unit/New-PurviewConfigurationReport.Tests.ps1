@@ -2,6 +2,9 @@
 #Requires -Modules @{ ModuleName = 'Pester'; ModuleVersion = '6.0.0' }
 
 BeforeAll {
+    # Run the code under test in strict mode so an unguarded missing property fails here, not in an
+    # operator's session that happens to enable it.
+    Set-StrictMode -Version Latest
     . "$PSScriptRoot/../../source/Public/New-PurviewConfigurationReport.ps1"
 
     function Get-TestSourcePath
