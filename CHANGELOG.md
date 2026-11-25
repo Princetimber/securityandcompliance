@@ -8,6 +8,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- `New-PurviewConfigurationReport` renders an "Endpoint DLP Policies" section listing the
+  exported DLP policies whose `EndpointDlpLocation` is set, in the generic one-table-per-object
+  layout. The global Endpoint DLP settings (file path exclusions, unallowed apps and browsers,
+  just-in-time protection) are not covered; no cmdlet for them has been identified.
 - `New-PurviewConfigurationReport` renders sections for data the export already collected but
   the report omitted: Retention Labels (`Get-ComplianceTag`), File Plan Properties (the seven
   `Get-FilePlanProperty*` cmdlets, each item tagged with its property type), Retention Events,
