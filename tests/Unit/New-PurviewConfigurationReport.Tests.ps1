@@ -201,6 +201,81 @@ Describe 'New-PurviewConfigurationReport' {
         }
     }
 
+    Context 'DSPM for AI policy section' {
+        BeforeAll {
+            $dspmSource = Get-TestSourcePath
+            @(
+                [pscustomobject]@{ Name = 'DSPM for AI: Detect sensitive info added to AI sites'; Priority = 0; Comment = ''; Enabled = $true; Workload = 'Endpoint' }
+                [pscustomobject]@{ Name = 'Ordinary-DLP-Policy'; Priority = 1; Comment = ''; Enabled = $true; Workload = 'Exchange' }
+            ) | Export-Clixml -Path (Join-Path -Path $dspmSource -ChildPath 'Get-DlpCompliancePolicy.xml')
+            @(
+                [pscustomobject]@{ Name = 'DSPM for AI - Detect risky AI usage'; Enabled = $true }
+                [pscustomobject]@{ Name = 'Microsoft AI Hub - Legacy IRM'; Enabled = $true }
+                [pscustomobject]@{ Name = 'Ordinary-IRM-Policy'; Enabled = $true }
+            ) | Export-Clixml -Path (Join-Path -Path $dspmSource -ChildPath 'Get-InsiderRiskPolicy.xml')
+            @(
+                [pscustomobject]@{ Name = 'DSPM for AI - Unethical behavior in AI apps'; Enabled = $true }
+                [pscustomobject]@{ Name = 'Ordinary-CC-Policy'; Enabled = $true }
+            ) | Export-Clixml -Path (Join-Path -Path $dspmSource -ChildPath 'Get-SupervisoryReviewPolicyV2.xml')
+            $dspmHtml = Get-ReportHtml -SourcePath $dspmSource
+            $dspmSection = [regex]::Match($dspmHtml, '(?s)<h2[^>]*>DSPM for AI Policies</h2>(.*?)(?=<h2|</body>)').Groups[1].Value
+        }
+
+        It 'renders a DSPM for AI Policies heading' {
+            $dspmHtml | Should -Match 'DSPM for AI Policies</h2>'
+        }
+
+        It 'includes DLP, IRM and Communication Compliance policies with a DSPM for AI or Microsoft AI Hub name prefix' {
+            $dspmSection | Should -Match 'Detect sensitive info added to AI sites'
+            $dspmSection | Should -Match 'Detect risky AI usage'
+            $dspmSection | Should -Match 'Microsoft AI Hub - Legacy IRM'
+            $dspmSection | Should -Match 'Unethical behavior in AI apps'
+        }
+
+        It 'labels each policy with the workload it was exported from' {
+            $dspmSection | Should -Match 'DLP'
+            $dspmSection | Should -Match 'Insider Risk'
+            $dspmSection | Should -Match 'Communication Compliance'
+        }
+
+        It 'excludes policies without a DSPM for AI or Microsoft AI Hub prefix' {
+            $dspmSection | Should -Not -Match 'Ordinary-'
+        }
+
+        It 'renders the no-data message when no DSPM for AI policy was exported' {
+            $emptySource = Get-TestSourcePath
+            [pscustomobject]@{ Name = 'Ordinary-DLP-Policy'; Priority = 1; Comment = ''; Enabled = $true; Workload = 'Exchange' } | Export-Clixml -Path (Join-Path -Path $emptySource -ChildPath 'Get-DlpCompliancePolicy.xml')
+            $emptyHtml = Get-ReportHtml -SourcePath $emptySource
+            $emptySection = [regex]::Match($emptyHtml, '(?s)<h2[^>]*>DSPM for AI Policies</h2>(.*?)(?=<h2|</body>)').Groups[1].Value
+            $emptySection | Should -Match 'No data exported for this workload'
+        }
+    }
+
+    Context 'Insider Risk cases section' {
+        It 'renders cases from Get-InsiderRiskCase.xml under an Insider Risk Cases heading' {
+            $irmSource = Get-TestSourcePath
+            [pscustomobject]@{ Name = 'IRM-Case-1'; CaseType = 'InsiderRisk' } |
+                Export-Clixml -Path (Join-Path -Path $irmSource -ChildPath 'Get-InsiderRiskCase.xml')
+
+            $irmHtml = Get-ReportHtml -SourcePath $irmSource
+
+            $irmHtml | Should -Match 'Insider Risk Cases</h2>'
+            $irmHtml | Should -Match 'IRM-Case-1'
+        }
+
+        It 'does not render eDiscovery cases from Get-ComplianceCase.xml in the Insider Risk Cases section' {
+            $irmSource = Get-TestSourcePath
+            [pscustomobject]@{ Name = 'eDiscovery-Case-1'; CaseType = 'eDiscovery' } |
+                Export-Clixml -Path (Join-Path -Path $irmSource -ChildPath 'Get-ComplianceCase.xml')
+
+            $irmHtml = Get-ReportHtml -SourcePath $irmSource
+            $irmSection = [regex]::Match($irmHtml, '(?s)<h2[^>]*>Insider Risk Cases</h2>(.*?)(?=<h2|</body>)').Groups[1].Value
+
+            $irmSection | Should -Not -Match 'eDiscovery-Case-1'
+            $irmSection | Should -Match 'No data exported for this workload'
+        }
+    }
+
     Context 'ShouldProcess / -WhatIf' {
         It 'does not write the report when -WhatIf is specified' {
             $tenantPath = Get-TestSourcePath

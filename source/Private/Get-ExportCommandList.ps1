@@ -6,6 +6,8 @@ function Get-ExportCommandList
     # "Excluded from the default set entirely"). Get-Label and Get-ComplianceSecurityFilter
     # are also absent on purpose: the caller adds Get-Label (it needs
     # -IncludeDetailedLabelActions) and runs Get-ComplianceSecurityFilter in its own session.
+    # Get-InsiderRiskCase is not a real cmdlet: it names the Get-ComplianceCase -CaseType
+    # InsiderRisk run (see $commandSpecs in Export-PurviewConfiguration) and its output file.
     [CmdletBinding()]
     [OutputType([string[]])]
     param()
@@ -49,6 +51,7 @@ function Get-ExportCommandList
         'Get-FilePlanPropertyStructure'
         'Get-FilePlanPropertySubCategory'
         'Get-ComplianceCase'
+        'Get-InsiderRiskCase'
         'Get-ComplianceCaseStatistics'
         'Get-ComplianceRetentionEvent'
         'Get-ComplianceRetentionEventType'

@@ -111,6 +111,16 @@ BeforeAll {
         param()
     }
 
+    function Get-ComplianceCase
+    {
+        [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSReviewUnusedParameter', '', Justification = 'Stub signature only, mocked in tests below')]
+        [CmdletBinding()]
+        param(
+            [Parameter()]
+            [string]$CaseType
+        )
+    }
+
     function Get-QuarantineMessage
     {
         [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSReviewUnusedParameter', '', Justification = 'Stub signature only, mocked in tests below')]
@@ -503,6 +513,48 @@ Describe 'Export-PurviewConfiguration' {
                 Should -Throw
 
             Should -Invoke Disconnect-ExchangeOnline -Times 1 -Exactly -ParameterFilter { $ConnectionId -eq 'standard-1' }
+        }
+    }
+
+    Context 'Insider Risk cases (Get-ComplianceCase -CaseType InsiderRisk)' {
+        BeforeAll {
+            # Get-ComplianceCase writes Get-ComplianceCase.xml for eDiscovery cases; the Insider
+            # Risk run must land in its own file or the second write would overwrite the first.
+            Mock Get-ComplianceCase -ParameterFilter { $CaseType -eq 'InsiderRisk' } -MockWith {
+                @([pscustomobject]@{ Name = 'IRM-Case-1'; CaseType = 'InsiderRisk' })
+            }
+            Mock Get-ComplianceCase -ParameterFilter { -not $CaseType } -MockWith {
+                @([pscustomobject]@{ Name = 'eDiscovery-Case-1'; CaseType = 'eDiscovery' })
+            }
+        }
+
+        It 'is a valid -Command value and reports under its own name' {
+            $result = Export-PurviewConfiguration -OutputPath $TestDrive -Command 'Get-InsiderRiskCase' -SkipModuleCheck -SkipComplianceSecurityFilter -Confirm:$false
+
+            $result.Command | Should -Be 'Get-InsiderRiskCase'
+            $result.RecordCount | Should -Be 1
+            $result.Exported | Should -BeTrue
+        }
+
+        It 'calls Get-ComplianceCase with -CaseType InsiderRisk' {
+            $null = Export-PurviewConfiguration -OutputPath $TestDrive -Command 'Get-InsiderRiskCase' -SkipModuleCheck -SkipComplianceSecurityFilter -Confirm:$false
+
+            Should -Invoke Get-ComplianceCase -Times 1 -ParameterFilter { $CaseType -eq 'InsiderRisk' }
+        }
+
+        It 'writes Get-InsiderRiskCase.xml, not Get-ComplianceCase.xml' {
+            $null = Export-PurviewConfiguration -OutputPath $TestDrive -Command 'Get-InsiderRiskCase' -SkipModuleCheck -SkipComplianceSecurityFilter -Confirm:$false
+
+            Should -Invoke Export-Clixml -Times 1 -ParameterFilter { $Path -like '*Get-InsiderRiskCase.xml' }
+            Should -Invoke Export-Clixml -Times 0 -ParameterFilter { $Path -like '*Get-ComplianceCase.xml' }
+        }
+
+        It 'keeps the plain Get-ComplianceCase export on the default case type' {
+            $result = Export-PurviewConfiguration -OutputPath $TestDrive -Command 'Get-ComplianceCase' -SkipModuleCheck -SkipComplianceSecurityFilter -Confirm:$false
+
+            $result.Command | Should -Be 'Get-ComplianceCase'
+            Should -Invoke Get-ComplianceCase -Times 1 -ParameterFilter { -not $CaseType }
+            Should -Invoke Export-Clixml -Times 1 -ParameterFilter { $Path -like '*Get-ComplianceCase.xml' }
         }
     }
 

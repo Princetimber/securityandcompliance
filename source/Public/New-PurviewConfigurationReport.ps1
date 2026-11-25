@@ -9,7 +9,10 @@ function New-PurviewConfigurationReport
         Reads the .xml files produced by Export-PurviewConfiguration from -SourcePath and
         renders an HTML report covering Information Protection labels/policies, Auto-Labeling,
         DLP, Retention, Communication Compliance, Data Classification/Sensitive Information
-        Types, Information Barriers, and Insider Risk Management configuration. Sections with
+        Types, Information Barriers, and Insider Risk Management configuration (policies and
+        cases), plus a
+        "DSPM for AI Policies" section listing the exported DLP, Insider Risk and Communication
+        Compliance policies whose name starts with "DSPM for AI" or "Microsoft AI Hub". Sections with
         no exported data (e.g. cmdlets not available to the connected account's role) render
         as "No data exported for this workload" rather than being silently omitted. Useful for
         reviewing a tenant's configuration against a proposed design where direct portal
@@ -174,6 +177,39 @@ function New-PurviewConfigurationReport
             $section.Add('</table><br/>')
         }
         return ($section -join '')
+    }
+
+    function Select-DspmForAiPolicy
+    {
+        # DSPM for AI's one-click policies are ordinary DLP, Insider Risk and Communication
+        # Compliance policies; no cmdlet or API reads DSPM for AI itself. They are recognised
+        # by name prefix ("Microsoft AI Hub" is the prefix used by policies created during the
+        # preview). Returns copies tagged with their source workload; the exported objects are
+        # not modified.
+        [CmdletBinding()]
+        param(
+            [Parameter()]
+            [AllowNull()]
+            [object[]]$Items,
+            [Parameter(Mandatory)]
+            [string]$PolicyType
+        )
+        foreach ($item in @($Items))
+        {
+            if ($null -eq $item -or $item.PSObject.Properties.Name -notcontains 'Name')
+            {
+                continue
+            }
+            if ($item.Name -match '^(DSPM for AI|Microsoft AI Hub)')
+            {
+                $tagged = [ordered]@{ PolicyType = $PolicyType }
+                foreach ($property in $item.PSObject.Properties)
+                {
+                    $tagged[$property.Name] = $property.Value
+                }
+                [pscustomobject]$tagged
+            }
+        }
     }
 
     function ConvertTo-LabelActionRowsHtml
@@ -484,6 +520,13 @@ function New-PurviewConfigurationReport
         $output.Add((ConvertTo-DetailSectionHtml -Heading 'DLP EDM Schemas' -Items (Get-SourceData -Path $SourcePath -Cmdlet 'Get-DlpEdmSchema') -TitleProperty 'Name'))
         $output.Add((ConvertTo-DetailSectionHtml -Heading 'Information Barrier Policies' -Items (Get-SourceData -Path $SourcePath -Cmdlet 'Get-InformationBarrierPolicy') -TitleProperty 'Name'))
         $output.Add((ConvertTo-DetailSectionHtml -Heading 'Insider Risk Policies' -Items (Get-SourceData -Path $SourcePath -Cmdlet 'Get-InsiderRiskPolicy') -TitleProperty 'Name'))
+        $output.Add((ConvertTo-DetailSectionHtml -Heading 'Insider Risk Cases' -Items (Get-SourceData -Path $SourcePath -Cmdlet 'Get-InsiderRiskCase') -TitleProperty 'Name'))
+        $dspmForAiPolicies = @(
+            Select-DspmForAiPolicy -Items (Get-SourceData -Path $SourcePath -Cmdlet 'Get-DlpCompliancePolicy') -PolicyType 'DLP'
+            Select-DspmForAiPolicy -Items (Get-SourceData -Path $SourcePath -Cmdlet 'Get-InsiderRiskPolicy') -PolicyType 'Insider Risk'
+            Select-DspmForAiPolicy -Items (Get-SourceData -Path $SourcePath -Cmdlet 'Get-SupervisoryReviewPolicyV2') -PolicyType 'Communication Compliance'
+        )
+        $output.Add((ConvertTo-DetailSectionHtml -Heading 'DSPM for AI Policies' -Items $dspmForAiPolicies -TitleProperty 'Name'))
         $output.Add('</body></html>')
         $htmlReportPath = Join-Path -Path $SourcePath -ChildPath $HTMLReport
         if ($PSCmdlet.ShouldProcess($htmlReportPath, 'Write HTML report'))

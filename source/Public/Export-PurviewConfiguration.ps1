@@ -367,9 +367,11 @@ function Export-PurviewConfiguration
         Confirm-ExportOutputPath -Path $OutputPath -TenantId $tenantId -KnownCommands $validCommands -Force:$Force
         # Get-Label needs -IncludeDetailedLabelActions to capture full label configuration;
         # Get-QuarantineMessage/Get-DlpDetectionsReport need paging (see Get-PagedReportData's
-        # comment). Every other cmdlet runs with no additional parameters.
+        # comment). Get-InsiderRiskCase runs Get-ComplianceCase -CaseType InsiderRisk, written to
+        # its own file. Every other cmdlet runs with no additional parameters.
         $commandSpecs = @{
             'Get-Label'               = @{ AdditionalParameters = @{ IncludeDetailedLabelActions = $true } }
+            'Get-InsiderRiskCase'     = @{ Cmdlet = 'Get-ComplianceCase'; AdditionalParameters = @{ CaseType = 'InsiderRisk' } }
             'Get-QuarantineMessage'   = @{ Paged = $true; PageSize = 1000; AdditionalParameters = @{ StartReceivedDate = (Get-Date).AddDays(-30); EndReceivedDate = (Get-Date) } }
             'Get-DlpDetectionsReport' = @{ Paged = $true; PageSize = 5000; AdditionalParameters = @{} }
         }
