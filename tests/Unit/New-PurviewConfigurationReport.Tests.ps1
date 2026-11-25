@@ -361,6 +361,38 @@ Describe 'New-PurviewConfigurationReport' {
         }
     }
 
+    Context 'Endpoint DLP policy section' {
+        BeforeAll {
+            $script:endpointSource = Get-TestSourcePath
+            @(
+                [pscustomobject]@{ Name = 'Endpoint-DLP-Policy'; Priority = 0; Comment = ''; Enabled = $true; Workload = 'Endpoint'; EndpointDlpLocation = @('All') }
+                [pscustomobject]@{ Name = 'Exchange-Only-Policy'; Priority = 1; Comment = ''; Enabled = $true; Workload = 'Exchange'; EndpointDlpLocation = @() }
+                [pscustomobject]@{ Name = 'No-Endpoint-Property-Policy'; Priority = 2; Comment = ''; Enabled = $true; Workload = 'Exchange' }
+            ) | Export-Clixml -Path (Join-Path -Path $script:endpointSource -ChildPath 'Get-DlpCompliancePolicy.xml')
+            $endpointHtml = Get-ReportHtml -SourcePath $script:endpointSource
+            $script:endpointSection = [regex]::Match($endpointHtml, '(?s)<h2[^>]*>Endpoint DLP Policies</h2>(.*?)(?=<h2|</body>)').Groups[1].Value
+        }
+
+        It 'lists a DLP policy that has an endpoint location' {
+            $script:endpointSection | Should -Match 'Endpoint-DLP-Policy'
+        }
+
+        It 'excludes DLP policies with an empty or missing endpoint location' {
+            $script:endpointSection | Should -Not -Match 'Exchange-Only-Policy'
+            $script:endpointSection | Should -Not -Match 'No-Endpoint-Property-Policy'
+        }
+
+        It 'renders the no-data message when no DLP policy is scoped to endpoints' {
+            $noEndpointSource = Get-TestSourcePath
+            [pscustomobject]@{ Name = 'Exchange-Only-Policy'; Priority = 1; Comment = ''; Enabled = $true; Workload = 'Exchange'; EndpointDlpLocation = @() } |
+                Export-Clixml -Path (Join-Path -Path $noEndpointSource -ChildPath 'Get-DlpCompliancePolicy.xml')
+            $noEndpointHtml = Get-ReportHtml -SourcePath $noEndpointSource
+            $noEndpointSection = [regex]::Match($noEndpointHtml, '(?s)<h2[^>]*>Endpoint DLP Policies</h2>(.*?)(?=<h2|</body>)').Groups[1].Value
+
+            $noEndpointSection | Should -Match 'No data exported for this workload'
+        }
+    }
+
     Context 'ShouldProcess / -WhatIf' {
         It 'does not write the report when -WhatIf is specified' {
             $tenantPath = Get-TestSourcePath

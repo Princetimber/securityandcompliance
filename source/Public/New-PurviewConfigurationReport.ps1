@@ -8,7 +8,7 @@ function New-PurviewConfigurationReport
     .DESCRIPTION
         Reads the .xml files produced by Export-PurviewConfiguration from -SourcePath and
         renders an HTML report covering Information Protection labels/policies, Auto-Labeling,
-        DLP, Retention (policies, rules, adaptive scopes, retention labels, file plan properties,
+        DLP (including a section listing the policies scoped to endpoint devices), Retention (policies, rules, adaptive scopes, retention labels, file plan properties,
         retention events and event types, holds, audit log retention policies), Communication Compliance, Data Classification/Sensitive Information
         Types, Information Barriers, and Insider Risk Management configuration (policies and
         cases), plus a
@@ -238,6 +238,31 @@ function New-PurviewConfigurationReport
                 $tagged[$property.Name] = $property.Value
             }
             [pscustomobject]$tagged
+        }
+    }
+
+    function Select-EndpointDlpPolicy
+    {
+        # Endpoint DLP policies are ordinary DLP policies whose EndpointDlpLocation is set (it
+        # is empty for policies that cover only Exchange, SharePoint and the like). Returns the
+        # matching exported objects unchanged. A policy with no EndpointDlpLocation property is
+        # skipped rather than failing under strict mode.
+        [CmdletBinding()]
+        param(
+            [Parameter()]
+            [AllowNull()]
+            [object[]]$Items
+        )
+        foreach ($item in @($Items))
+        {
+            if ($null -eq $item -or $item.PSObject.Properties.Name -notcontains 'EndpointDlpLocation')
+            {
+                continue
+            }
+            if (@($item.EndpointDlpLocation | Where-Object { $_ }).Count -gt 0)
+            {
+                $item
+            }
         }
     }
 
@@ -535,6 +560,8 @@ function New-PurviewConfigurationReport
         $output.Add((ConvertTo-DetailSectionHtml -Heading 'Auto-Labeling Rules' -Items (Get-SourceData -Path $SourcePath -Cmdlet 'Get-AutoSensitivityLabelRule') -TitleProperty 'Name'))
         $output.Add((ConvertTo-DlpPolicySectionHtml -DlpPolicies (Get-SourceData -Path $SourcePath -Cmdlet 'Get-DlpCompliancePolicy')))
         $output.Add((ConvertTo-DlpRuleSectionHtml -DlpRules (Get-SourceData -Path $SourcePath -Cmdlet 'Get-DlpComplianceRule')))
+        $endpointDlpPolicies = @(Select-EndpointDlpPolicy -Items (Get-SourceData -Path $SourcePath -Cmdlet 'Get-DlpCompliancePolicy'))
+        $output.Add((ConvertTo-DetailSectionHtml -Heading 'Endpoint DLP Policies' -Items $endpointDlpPolicies -TitleProperty 'Name'))
         $output.Add((ConvertTo-DetailSectionHtml -Heading 'Retention Policies' -Items (Get-SourceData -Path $SourcePath -Cmdlet 'Get-RetentionCompliancePolicy') -TitleProperty 'Name'))
         $output.Add((ConvertTo-DetailSectionHtml -Heading 'Retention Rules' -Items (Get-SourceData -Path $SourcePath -Cmdlet 'Get-RetentionComplianceRule') -TitleProperty 'Name'))
         $output.Add((ConvertTo-DetailSectionHtml -Heading 'Adaptive Scopes' -Items (Get-SourceData -Path $SourcePath -Cmdlet 'Get-AdaptiveScope') -TitleProperty 'Name'))
