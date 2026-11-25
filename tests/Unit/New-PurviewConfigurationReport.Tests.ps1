@@ -218,7 +218,7 @@ Describe 'New-PurviewConfigurationReport' {
                 [pscustomobject]@{ Name = 'Ordinary-CC-Policy'; Enabled = $true }
             ) | Export-Clixml -Path (Join-Path -Path $dspmSource -ChildPath 'Get-SupervisoryReviewPolicyV2.xml')
             $dspmHtml = Get-ReportHtml -SourcePath $dspmSource
-            $dspmSection = [regex]::Match($dspmHtml, '(?s)<h2[^>]*>DSPM for AI Policies</h2>(.*?)(?=<h2|</body>)').Groups[1].Value
+            $script:dspmSection = [regex]::Match($dspmHtml, '(?s)<h2[^>]*>DSPM for AI Policies</h2>(.*?)(?=<h2|</body>)').Groups[1].Value
         }
 
         It 'renders a DSPM for AI Policies heading' {
@@ -226,20 +226,20 @@ Describe 'New-PurviewConfigurationReport' {
         }
 
         It 'includes DLP, IRM and Communication Compliance policies with a DSPM for AI or Microsoft AI Hub name prefix' {
-            $dspmSection | Should -Match 'Detect sensitive info added to AI sites'
-            $dspmSection | Should -Match 'Detect risky AI usage'
-            $dspmSection | Should -Match 'Microsoft AI Hub - Legacy IRM'
-            $dspmSection | Should -Match 'Unethical behavior in AI apps'
+            $script:dspmSection | Should -Match 'Detect sensitive info added to AI sites'
+            $script:dspmSection | Should -Match 'Detect risky AI usage'
+            $script:dspmSection | Should -Match 'Microsoft AI Hub - Legacy IRM'
+            $script:dspmSection | Should -Match 'Unethical behavior in AI apps'
         }
 
         It 'labels each policy with the workload it was exported from' {
-            $dspmSection | Should -Match 'DLP'
-            $dspmSection | Should -Match 'Insider Risk'
-            $dspmSection | Should -Match 'Communication Compliance'
+            $script:dspmSection | Should -Match 'DLP'
+            $script:dspmSection | Should -Match 'Insider Risk'
+            $script:dspmSection | Should -Match 'Communication Compliance'
         }
 
         It 'excludes policies without a DSPM for AI or Microsoft AI Hub prefix' {
-            $dspmSection | Should -Not -Match 'Ordinary-'
+            $script:dspmSection | Should -Not -Match 'Ordinary-'
         }
 
         It 'renders the no-data message when no DSPM for AI policy was exported' {
