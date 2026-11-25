@@ -8,6 +8,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- `New-PurviewConfigurationReport` renders sections for data the export already collected but
+  the report omitted: Retention Labels (`Get-ComplianceTag`), File Plan Properties (the seven
+  `Get-FilePlanProperty*` cmdlets, each item tagged with its property type), Retention Events,
+  Retention Event Types, Hold Policies, Hold Rules, Case Hold Rules and Audit Log Retention
+  Policies (`Get-UnifiedAuditLogRetentionPolicy`). Generic one-table-per-object layout, like the
+  other retention sections.
 - `Export-PurviewConfiguration` exports Insider Risk Management cases (`Get-ComplianceCase
   -CaseType InsiderRisk`) to `Get-InsiderRiskCase.xml`, selectable with `-Command
   Get-InsiderRiskCase`. `Get-InsiderRiskCase` is a name for that run, not a real cmdlet. It has

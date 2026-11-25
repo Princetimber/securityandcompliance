@@ -276,6 +276,91 @@ Describe 'New-PurviewConfigurationReport' {
         }
     }
 
+    Context 'Retention label, file plan, retention event and hold sections' {
+        BeforeAll {
+            function Get-SectionHtml
+            {
+                param(
+                    [Parameter(Mandatory)]
+                    [string]$Html,
+                    [Parameter(Mandatory)]
+                    [string]$Heading
+                )
+                [regex]::Match($Html, "(?s)<h2[^>]*>$([regex]::Escape($Heading))</h2>(.*?)(?=<h2|</body>)").Groups[1].Value
+            }
+            $retentionSource = Get-TestSourcePath
+            $exports = @{
+                'Get-ComplianceTag'               = [pscustomobject]@{ Name = 'Label-Keep-7y'; IsRecordLabel = $true }
+                'Get-FilePlanPropertyAuthority'   = [pscustomobject]@{ Name = 'Authority-A' }
+                'Get-FilePlanPropertyDepartment'  = [pscustomobject]@{ Name = 'Department-B' }
+                'Get-ComplianceRetentionEvent'    = [pscustomobject]@{ Name = 'Event-Leaver' }
+                'Get-ComplianceRetentionEventType' = [pscustomobject]@{ Name = 'EventType-Leaver' }
+                'Get-HoldCompliancePolicy'        = [pscustomobject]@{ Name = 'Hold-Policy-1' }
+                'Get-HoldComplianceRule'          = [pscustomobject]@{ Name = 'Hold-Rule-1' }
+                'Get-CaseHoldRule'                = [pscustomobject]@{ Name = 'Case-Hold-Rule-1' }
+            }
+            foreach ($cmdlet in $exports.Keys)
+            {
+                $exports[$cmdlet] | Export-Clixml -Path (Join-Path -Path $retentionSource -ChildPath "$cmdlet.xml")
+            }
+            $script:retentionHtml = Get-ReportHtml -SourcePath $retentionSource
+        }
+
+        It 'renders retention labels under a Retention Labels heading' {
+            $section = Get-SectionHtml -Html $script:retentionHtml -Heading 'Retention Labels'
+            $section | Should -Match 'Label-Keep-7y'
+        }
+
+        It 'renders file plan properties from every file plan cmdlet, labelled with the property type' {
+            $section = Get-SectionHtml -Html $script:retentionHtml -Heading 'File Plan Properties'
+            $section | Should -Match 'Authority-A'
+            $section | Should -Match 'Department-B'
+            $section | Should -Match 'Authority'
+            $section | Should -Match 'Department'
+        }
+
+        It 'renders retention events and retention event types in separate sections' {
+            (Get-SectionHtml -Html $script:retentionHtml -Heading 'Retention Events') | Should -Match 'Event-Leaver'
+            (Get-SectionHtml -Html $script:retentionHtml -Heading 'Retention Event Types') | Should -Match 'EventType-Leaver'
+            (Get-SectionHtml -Html $script:retentionHtml -Heading 'Retention Events') | Should -Not -Match 'EventType-Leaver'
+        }
+
+        It 'renders hold policies, hold rules and case hold rules in separate sections' {
+            (Get-SectionHtml -Html $script:retentionHtml -Heading 'Hold Policies') | Should -Match 'Hold-Policy-1'
+            (Get-SectionHtml -Html $script:retentionHtml -Heading 'Hold Rules') | Should -Match 'Hold-Rule-1'
+            (Get-SectionHtml -Html $script:retentionHtml -Heading 'Case Hold Rules') | Should -Match 'Case-Hold-Rule-1'
+        }
+
+        It 'renders the no-data message for each new section when nothing was exported' {
+            $emptyHtml = Get-ReportHtml -SourcePath (Get-TestSourcePath)
+            foreach ($heading in 'Retention Labels', 'File Plan Properties', 'Retention Events', 'Retention Event Types', 'Hold Policies', 'Hold Rules', 'Case Hold Rules')
+            {
+                (Get-SectionHtml -Html $emptyHtml -Heading $heading) | Should -Match 'No data exported for this workload'
+            }
+        }
+    }
+
+    Context 'Audit log retention policy section' {
+        It 'renders policies from Get-UnifiedAuditLogRetentionPolicy.xml under an Audit Log Retention Policies heading' {
+            $auditSource = Get-TestSourcePath
+            [pscustomobject]@{ Name = 'Audit-Retention-1y'; RetentionDuration = 'TwelveMonths' } |
+                Export-Clixml -Path (Join-Path -Path $auditSource -ChildPath 'Get-UnifiedAuditLogRetentionPolicy.xml')
+
+            $auditHtml = Get-ReportHtml -SourcePath $auditSource
+            $auditSection = [regex]::Match($auditHtml, '(?s)<h2[^>]*>Audit Log Retention Policies</h2>(.*?)(?=<h2|</body>)').Groups[1].Value
+
+            $auditSection | Should -Match 'Audit-Retention-1y'
+            $auditSection | Should -Match 'TwelveMonths'
+        }
+
+        It 'renders the no-data message when no audit log retention policy was exported' {
+            $emptyHtml = Get-ReportHtml -SourcePath (Get-TestSourcePath)
+            $emptySection = [regex]::Match($emptyHtml, '(?s)<h2[^>]*>Audit Log Retention Policies</h2>(.*?)(?=<h2|</body>)').Groups[1].Value
+
+            $emptySection | Should -Match 'No data exported for this workload'
+        }
+    }
+
     Context 'ShouldProcess / -WhatIf' {
         It 'does not write the report when -WhatIf is specified' {
             $tenantPath = Get-TestSourcePath
