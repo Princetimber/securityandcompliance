@@ -32,6 +32,11 @@ Describe 'Get-ExportCommandList' {
         $script:commands | Should -Not -Contain 'Get-ComplianceSecurityFilter'
     }
 
+    It 'includes Get-InsiderRiskCase, the Insider Risk run of Get-ComplianceCase, as its own entry' {
+        $script:commands | Should -Contain 'Get-InsiderRiskCase'
+        $script:commands | Should -Contain 'Get-ComplianceCase'
+    }
+
     It 'includes the cmdlets that need paging' {
         $script:commands | Should -Contain 'Get-QuarantineMessage'
         $script:commands | Should -Contain 'Get-DlpDetectionsReport'

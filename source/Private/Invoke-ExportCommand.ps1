@@ -17,16 +17,21 @@ function Invoke-ExportCommand
 
     try
     {
+        # CmdletName is also the output file name (CmdletName.xml). A spec may set 'Cmdlet' to
+        # run a different real cmdlet under that name, so two runs of one cmdlet with different
+        # parameters (Get-ComplianceCase vs Get-ComplianceCase -CaseType InsiderRisk) write
+        # separate files instead of overwriting each other.
+        $commandToRun = if ($Spec['Cmdlet']) { $Spec['Cmdlet'] } else { $CmdletName }
         # Index the hashtable rather than using dot access: under Set-StrictMode a missing key
         # read through dot access throws, and most specs carry no Paged key.
         $data = if ($Spec['Paged'])
         {
-            Get-PagedReportData -CmdletName $CmdletName -PageSize $Spec['PageSize'] -AdditionalParameters $Spec['AdditionalParameters']
+            Get-PagedReportData -CmdletName $commandToRun -PageSize $Spec['PageSize'] -AdditionalParameters $Spec['AdditionalParameters']
         }
         else
         {
             $additionalParams = $Spec['AdditionalParameters']
-            @(& $CmdletName @additionalParams -ErrorAction Stop)
+            @(& $commandToRun @additionalParams -ErrorAction Stop)
         }
 
         if (@($data).Count -gt 0)
