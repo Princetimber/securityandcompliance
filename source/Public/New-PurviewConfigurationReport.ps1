@@ -8,7 +8,8 @@ function New-PurviewConfigurationReport
     .DESCRIPTION
         Reads the .xml files produced by Export-PurviewConfiguration from -SourcePath and
         renders an HTML report covering Information Protection labels/policies, Auto-Labeling,
-        DLP, Retention, Communication Compliance, Data Classification/Sensitive Information
+        DLP, Retention (policies, rules, adaptive scopes, retention labels, file plan properties,
+        retention events and event types, holds, audit log retention policies), Communication Compliance, Data Classification/Sensitive Information
         Types, Information Barriers, and Insider Risk Management configuration (policies and
         cases), plus a
         "DSPM for AI Policies" section listing the exported DLP, Insider Risk and Communication
@@ -209,6 +210,34 @@ function New-PurviewConfigurationReport
                 }
                 [pscustomobject]$tagged
             }
+        }
+    }
+
+    function Add-FilePlanPropertyType
+    {
+        # The seven Get-FilePlanProperty* cmdlets each export their own file but share one
+        # report section. Returns copies tagged with the property type (Authority, Category,
+        # ...), taken from the cmdlet name; the exported objects are not modified.
+        [CmdletBinding()]
+        param(
+            [Parameter()]
+            [AllowNull()]
+            [object[]]$Items,
+            [Parameter(Mandatory)]
+            [string]$PropertyType
+        )
+        foreach ($item in @($Items))
+        {
+            if ($null -eq $item)
+            {
+                continue
+            }
+            $tagged = [ordered]@{ PropertyType = $PropertyType }
+            foreach ($property in $item.PSObject.Properties)
+            {
+                $tagged[$property.Name] = $property.Value
+            }
+            [pscustomobject]$tagged
         }
     }
 
@@ -509,6 +538,20 @@ function New-PurviewConfigurationReport
         $output.Add((ConvertTo-DetailSectionHtml -Heading 'Retention Policies' -Items (Get-SourceData -Path $SourcePath -Cmdlet 'Get-RetentionCompliancePolicy') -TitleProperty 'Name'))
         $output.Add((ConvertTo-DetailSectionHtml -Heading 'Retention Rules' -Items (Get-SourceData -Path $SourcePath -Cmdlet 'Get-RetentionComplianceRule') -TitleProperty 'Name'))
         $output.Add((ConvertTo-DetailSectionHtml -Heading 'Adaptive Scopes' -Items (Get-SourceData -Path $SourcePath -Cmdlet 'Get-AdaptiveScope') -TitleProperty 'Name'))
+        $output.Add((ConvertTo-DetailSectionHtml -Heading 'Retention Labels' -Items (Get-SourceData -Path $SourcePath -Cmdlet 'Get-ComplianceTag') -TitleProperty 'Name'))
+        $filePlanProperties = @(
+            foreach ($propertyType in 'Authority', 'Category', 'Citation', 'Department', 'ReferenceId', 'Structure', 'SubCategory')
+            {
+                Add-FilePlanPropertyType -Items (Get-SourceData -Path $SourcePath -Cmdlet "Get-FilePlanProperty$propertyType") -PropertyType $propertyType
+            }
+        )
+        $output.Add((ConvertTo-DetailSectionHtml -Heading 'File Plan Properties' -Items $filePlanProperties -TitleProperty 'Name'))
+        $output.Add((ConvertTo-DetailSectionHtml -Heading 'Retention Events' -Items (Get-SourceData -Path $SourcePath -Cmdlet 'Get-ComplianceRetentionEvent') -TitleProperty 'Name'))
+        $output.Add((ConvertTo-DetailSectionHtml -Heading 'Retention Event Types' -Items (Get-SourceData -Path $SourcePath -Cmdlet 'Get-ComplianceRetentionEventType') -TitleProperty 'Name'))
+        $output.Add((ConvertTo-DetailSectionHtml -Heading 'Hold Policies' -Items (Get-SourceData -Path $SourcePath -Cmdlet 'Get-HoldCompliancePolicy') -TitleProperty 'Name'))
+        $output.Add((ConvertTo-DetailSectionHtml -Heading 'Hold Rules' -Items (Get-SourceData -Path $SourcePath -Cmdlet 'Get-HoldComplianceRule') -TitleProperty 'Name'))
+        $output.Add((ConvertTo-DetailSectionHtml -Heading 'Case Hold Rules' -Items (Get-SourceData -Path $SourcePath -Cmdlet 'Get-CaseHoldRule') -TitleProperty 'Name'))
+        $output.Add((ConvertTo-DetailSectionHtml -Heading 'Audit Log Retention Policies' -Items (Get-SourceData -Path $SourcePath -Cmdlet 'Get-UnifiedAuditLogRetentionPolicy') -TitleProperty 'Name'))
         $output.Add((ConvertTo-DetailSectionHtml -Heading 'Communication Compliance Policies' -Items (Get-SourceData -Path $SourcePath -Cmdlet 'Get-SupervisoryReviewPolicyV2') -TitleProperty 'Name'))
         $output.Add((ConvertTo-DetailSectionHtml -Heading 'Communication Compliance Rules' -Items (Get-SourceData -Path $SourcePath -Cmdlet 'Get-SupervisoryReviewRule') -TitleProperty 'Name'))
         # Built-in SITs report Publisher 'Microsoft Corporation'; only admin-created custom
